@@ -39,7 +39,7 @@ GEMINI_API_KEY=your-gemini-api-key
 ```
 
 ### 3. 啟動
-
+終端機開啟伺服器 ollama serve
 ```bash
 uv run uvicorn app.main:app --reload
 ```

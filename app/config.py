@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     # === Ollama（本地摘要，可選）===
     OLLAMA_ENABLED: bool = False
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "gemma2:9b"
+    OLLAMA_MODEL: str = "qwen2.5:7b"
+    OLLAMA_NUM_CTX: int = 8192
 
     # === 通用 ===
     UPLOAD_DIR: str = "./uploads"

@@ -51,18 +51,34 @@ async def generate_summary(transcript: str) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                f"{settings.OLLAMA_BASE_URL}/api/chat",
                 json={
                     "model": settings.OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "format": "json",
+                    "messages": [
+                        {"role": "user", "content": prompt},
+                    ],
                     "stream": False,
+                    "options": {
+                        "num_ctx": settings.OLLAMA_NUM_CTX,
+                    },
                 },
             )
             response.raise_for_status()
 
         result = response.json()
-        parsed = json.loads(result["response"])
+        content = result["message"]["content"]
+
+        # 移除 LLM 可能回傳的 markdown code fence
+        content = content.strip()
+        if content.startswith("```"):
+            # 移除開頭的 ```json 或 ``` 行
+            first_newline = content.index("\n")
+            content = content[first_newline + 1:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        parsed = json.loads(content)
         logger.info("Ollama 摘要生成完成")
         return parsed
 
