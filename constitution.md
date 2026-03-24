@@ -88,6 +88,7 @@ meeting-minutes-ai/
 │   │   └── routes/
 │   ├── dependencies.py       # DI 工廠函式
 │   ├── services/             # 業務邏輯層
+│   │   ├── annotation_service.py  # TextGrid/RTTM 解析
 │   │   └── providers/        # AudioProcessor 實作（策略模式）
 │   ├── models/               # Pydantic / SQLAlchemy 資料模型
 │   ├── core/                 # 核心工具（例外處理等）

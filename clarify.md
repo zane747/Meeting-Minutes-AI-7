@@ -111,3 +111,65 @@
 - **429 Rate Limit：** 提示「API 頻率受限，請稍候或切換本地模式」
 - **401 API Key 無效：** 提示「API Key 設定錯誤，請檢查 .env 設定」
 - **其他錯誤：** 通用錯誤提示 + 重試按鈕
+
+---
+
+## 第三輪澄清（2026-03-24 已確認 — TextGrid / RTTM / FLAC 新功能）
+
+### Q20：AudioProcessor.process() 介面變更
+
+**決策：** ✅ **新增可選 `ProcessingContext` 參數**
+
+- `process(file_path, context=None)` — `context` 預設 `None`，既有 Provider 不受影響
+- `ProcessingContext` dataclass 攜帶 TextGrid 逐字稿與 RTTM 說話者資訊
+- Provider 收到 context 後可決定是否跳過轉錄、注入角色資訊至 Prompt
+
+---
+
+### Q21：TextGrid/RTTM 解析應在哪一層？
+
+**決策：** ✅ **C — 獨立 Service**
+
+- 新建 `app/services/annotation_service.py`
+- 職責分離：`parse_textgrid()` 與 `parse_rttm()` 各自獨立
+- 解析結果由 `MeetingProcessor` 協調，組裝為 `ProcessingContext` 傳入 Provider
+
+---
+
+### Q22：有 TextGrid 時的處理流程
+
+**決策：** ✅ **C — 使用者可選擇**
+
+- 上傳頁提供選項：「使用 TextGrid 逐字稿」或「重新 AI 轉錄」
+- 選「使用 TextGrid」→ 跳過 Provider 轉錄，僅做摘要
+- 選「重新 AI 轉錄」→ 忽略 TextGrid 逐字稿，照常呼叫 Provider
+
+---
+
+### Q23：RTTM 角色標籤如何與 AI 轉錄結合
+
+**決策：** ✅ **B — 前處理注入 Prompt**
+
+- 將 RTTM 說話者片段資訊注入 Gemini Prompt，讓 AI 直接產出帶角色標籤的逐字稿
+- 本地模式（Whisper）：轉錄後再根據 RTTM 時間軸後處理合併
+
+---
+
+### Q24：DB Meeting 模型新增欄位
+
+**決策：** ✅ **獨立 `AnnotationFile` 關聯表**
+
+- 新建 `annotation_files` 資料表，與 Meeting 一對多關聯
+- 欄位：id, meeting_id, file_type (textgrid/rttm), file_name, file_path, parsed_data (JSON)
+- 不在 Meeting 表中新增欄位，保持主表乾淨
+
+---
+
+### Q25：API 多檔案上傳
+
+**決策：** ✅ **A — 多個 UploadFile 參數**
+
+- `file: UploadFile`（音檔，必要）
+- `textgrid: UploadFile | None = None`（TextGrid，選填）
+- `rttm: UploadFile | None = None`（RTTM，選填）
+- 後端依參數名稱區分，不依賴副檔名判斷

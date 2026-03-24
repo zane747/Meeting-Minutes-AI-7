@@ -59,7 +59,10 @@ async def meeting_detail(
     """結果頁（逐字稿 + 摘要 + Action Items）。"""
     result = await db.execute(
         select(Meeting)
-        .options(selectinload(Meeting.action_items))
+        .options(
+            selectinload(Meeting.action_items),
+            selectinload(Meeting.annotation_files),
+        )
         .where(Meeting.id == meeting_id)
     )
     meeting = result.scalar_one_or_none()

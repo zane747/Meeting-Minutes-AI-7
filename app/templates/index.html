@@ -7,14 +7,47 @@
     <h1 class="text-2xl font-bold text-gray-800 mb-6">上傳會議錄音</h1>
 
     <form id="upload-form" enctype="multipart/form-data" class="space-y-6">
-        <!-- 檔案選擇 -->
+        <!-- 音檔選擇（必要） -->
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">選擇音檔</label>
-            <input type="file" id="file-input" name="file" accept=".mp3,.wav"
+            <label class="block text-sm font-medium text-gray-700 mb-2">音檔 <span class="text-red-500">*</span></label>
+            <input type="file" id="file-input" name="file" accept=".mp3,.wav,.flac"
                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                    required>
             <p id="file-info" class="mt-2 text-sm text-gray-500 hidden"></p>
             <p id="file-error" class="mt-2 text-sm text-red-600 hidden"></p>
+        </div>
+
+        <!-- TextGrid（選填） -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                TextGrid 標註檔 <span class="text-gray-400">（選填，語音標註/逐字稿）</span>
+            </label>
+            <input type="file" id="textgrid-input" name="textgrid" accept=".TextGrid,.textgrid"
+                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100">
+        </div>
+
+        <!-- TextGrid 選項（有 TextGrid 時顯示） -->
+        <div id="textgrid-options" class="hidden bg-green-50 border border-green-200 rounded-lg p-4">
+            <label class="block text-sm font-medium text-green-800 mb-2">TextGrid 處理方式</label>
+            <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="skip_transcription" value="true" checked class="text-green-600">
+                    <span class="text-sm">使用 TextGrid 逐字稿（跳過 AI 轉錄）</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="skip_transcription" value="false" class="text-green-600">
+                    <span class="text-sm">重新 AI 轉錄（忽略 TextGrid 逐字稿）</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- RTTM（選填） -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                RTTM 角色辨識檔 <span class="text-gray-400">（選填，說話者辨識）</span>
+            </label>
+            <input type="file" id="rttm-input" name="rttm" accept=".rttm"
+                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100">
         </div>
 
         <!-- 會議標題 -->
@@ -68,6 +101,8 @@
 {% block scripts %}
 <script>
 const fileInput = document.getElementById('file-input');
+const textgridInput = document.getElementById('textgrid-input');
+const textgridOptions = document.getElementById('textgrid-options');
 const fileInfo = document.getElementById('file-info');
 const fileError = document.getElementById('file-error');
 const durationInput = document.getElementById('duration');
@@ -78,24 +113,21 @@ const progressBar = document.getElementById('progress-bar');
 const progressText = document.getElementById('progress-text');
 const maxSizeMB = {{ max_file_size_mb }};
 
-// 檔案選擇時顯示資訊
+// 音檔選擇
 fileInput.addEventListener('change', function() {
     const file = this.files[0];
     fileError.classList.add('hidden');
     fileInfo.classList.add('hidden');
-
     if (!file) return;
 
-    // 驗證格式
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['mp3', 'wav'].includes(ext)) {
-        fileError.textContent = '不支援的檔案格式，僅支援 .mp3、.wav';
+    if (!['mp3', 'wav', 'flac'].includes(ext)) {
+        fileError.textContent = '不支援的檔案格式，僅支援 .mp3、.wav、.flac';
         fileError.classList.remove('hidden');
         this.value = '';
         return;
     }
 
-    // 驗證大小
     const sizeMB = (file.size / 1024 / 1024).toFixed(1);
     if (file.size > maxSizeMB * 1024 * 1024) {
         fileError.textContent = `檔案大小 ${sizeMB}MB 超過上限 ${maxSizeMB}MB`;
@@ -104,7 +136,6 @@ fileInput.addEventListener('change', function() {
         return;
     }
 
-    // 取得時長
     const audio = new Audio();
     audio.src = URL.createObjectURL(file);
     audio.addEventListener('loadedmetadata', function() {
@@ -115,6 +146,15 @@ fileInput.addEventListener('change', function() {
         fileInfo.classList.remove('hidden');
         URL.revokeObjectURL(audio.src);
     });
+});
+
+// TextGrid 選擇時顯示選項
+textgridInput.addEventListener('change', function() {
+    if (this.files[0]) {
+        textgridOptions.classList.remove('hidden');
+    } else {
+        textgridOptions.classList.add('hidden');
+    }
 });
 
 // 表單提交
@@ -136,13 +176,24 @@ form.addEventListener('submit', async function(e) {
     const title = document.getElementById('title').value;
     if (title) formData.append('title', title);
 
+    // 附加 TextGrid
+    const textgridFile = textgridInput.files[0];
+    if (textgridFile) formData.append('textgrid', textgridFile);
+
+    // 附加 RTTM
+    const rttmFile = document.getElementById('rttm-input').files[0];
+    if (rttmFile) formData.append('rttm', rttmFile);
+
     const mode = document.querySelector('input[name="mode"]:checked').value;
+    const skipTranscription = textgridFile
+        ? document.querySelector('input[name="skip_transcription"]:checked').value
+        : 'false';
 
     try {
         progressBar.style.width = '60%';
         progressText.textContent = '處理中...';
 
-        const resp = await fetch(`/api/meetings/upload-and-process?mode=${mode}`, {
+        const resp = await fetch(`/api/meetings/upload-and-process?mode=${mode}&skip_transcription=${skipTranscription}`, {
             method: 'POST',
             body: formData,
         });
@@ -155,7 +206,6 @@ form.addEventListener('submit', async function(e) {
         const data = await resp.json();
         progressBar.style.width = '100%';
         progressText.textContent = '已送出，跳轉中...';
-
         window.location.href = `/meetings/${data.meeting_id}`;
     } catch (err) {
         fileError.textContent = err.message;

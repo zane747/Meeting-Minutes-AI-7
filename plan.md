@@ -90,31 +90,47 @@
 
 ```python
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ProcessingContext:
+    """標註檔解析後的上下文資訊。
+
+    由 AnnotationService 解析 TextGrid/RTTM 後組裝，
+    傳入 Provider 影響處理行為。
+    """
+    transcript: str | None = None       # TextGrid 匯入的逐字稿
+    speakers: list[dict] | None = None  # RTTM 解析的說話者片段
+    skip_transcription: bool = False    # 使用者選擇跳過轉錄
 
 
 @dataclass
 class ProcessingResult:
     """AI 處理結果的統一資料結構。"""
 
-    suggested_title: str | None
-    transcript: str
-    summary: str
-    action_items: list[dict]
+    suggested_title: str | None = None
+    transcript: str = ""
+    summary: str = ""
+    action_items: list[dict] = field(default_factory=list)
 
 
 class AudioProcessor(ABC):
     """音檔處理的抽象介面（Strategy Interface）。
 
     所有 Provider 必須實作此介面，確保主程式與具體模型實作解耦。
+    context 參數預設為 None，既有 Provider 不受影響。
     """
 
     @abstractmethod
-    async def process(self, file_path: str) -> ProcessingResult:
+    async def process(
+        self, file_path: str, context: ProcessingContext | None = None
+    ) -> ProcessingResult:
         """處理音檔，回傳統一格式的結果。
 
         Args:
             file_path: 音訊檔案的路徑。
+            context: 標註檔上下文（TextGrid 逐字稿、RTTM 說話者），可選。
 
         Returns:
             包含逐字稿、摘要與待辦事項的結構化結果。
@@ -142,12 +158,15 @@ class GeminiProvider(AudioProcessor):
 
     利用 Gemini 原生多模態能力，將音檔直接傳送至 API，
     單一 Prompt 同時回傳逐字稿、摘要與 Action Items。
+    支援 ProcessingContext：跳過轉錄 / 注入 RTTM 說話者資訊。
     """
 
-    async def process(self, file_path: str) -> ProcessingResult:
-        # 1. 上傳音檔至 Gemini File API
-        # 2. 發送 Prompt，要求回傳結構化 JSON
-        # 3. 解析回應，回傳 ProcessingResult
+    async def process(
+        self, file_path: str, context: ProcessingContext | None = None
+    ) -> ProcessingResult:
+        # A) 有 context.transcript + skip_transcription → 僅文字 Prompt 做摘要
+        # B) 有 context.speakers → 將 RTTM 說話者資訊注入 Prompt
+        # C) 無 context → 照常多模態處理
         ...
 
     def get_provider_name(self) -> str:
@@ -163,15 +182,18 @@ class LocalWhisperProvider(AudioProcessor):
     使用 OpenAI Whisper 進行語音轉錄（Lazy Load + 快取模式）。
     逐字稿保留原始語言，不強制轉為繁體中文。
     若已配置 Ollama，可選配本地摘要功能。
+    支援 ProcessingContext：跳過轉錄 / 後處理合併角色標籤。
     """
 
     _model = None  # 類別層級快取，Lazy Load
 
-    async def process(self, file_path: str) -> ProcessingResult:
-        # 1. Lazy Load：若 _model 為 None，載入並快取
-        # 2. 轉錄音檔，產出帶時間戳記的文字（保留原始語言）
-        # 3. 若 Ollama 可用，呼叫本地 LLM 生成摘要與 Action Items
-        # 4. 回傳 ProcessingResult
+    async def process(
+        self, file_path: str, context: ProcessingContext | None = None
+    ) -> ProcessingResult:
+        # A) 有 context.transcript + skip_transcription → 跳過 Whisper
+        # B) 無 context → Whisper 轉錄
+        # C) 有 context.speakers → 後處理合併角色標籤至逐字稿
+        # D) Ollama 摘要（若可用）
         ...
 
     def get_provider_name(self) -> str:
@@ -291,6 +313,17 @@ def get_audio_processor(mode: str | None = Query(None)) -> AudioProcessor:
 | `due_date` | String (nullable) | 截止日期 |
 | `is_completed` | Boolean | 是否已完成 |
 
+### AnnotationFile（標註檔案）
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | UUID | 主鍵 |
+| `meeting_id` | UUID | 外鍵，關聯 Meeting |
+| `file_type` | String | `textgrid` / `rttm` |
+| `file_name` | String | 原始檔案名稱 |
+| `file_path` | String (nullable) | 儲存路徑 |
+| `parsed_data` | JSON (Text) | 解析後的結構化資料（JSON 字串） |
+
 ### 狀態機
 
 ```
@@ -317,7 +350,7 @@ processing ──▶ completed
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| `POST` | `/api/meetings/upload-and-process?mode=remote\|local` | 一步驟：上傳音檔 + 自動觸發 AI 處理 |
+| `POST` | `/api/meetings/upload-and-process?mode=remote\|local&skip_transcription=false` | 上傳音檔（+ TextGrid/RTTM 選填）+ 自動觸發 AI 處理 |
 | `POST` | `/api/meetings/{id}/retry?mode=remote\|local` | 失敗後重新觸發（允許切換 Provider） |
 | `GET` | `/api/meetings/{id}/status` | 查詢處理狀態（供 HTMX polling） |
 | `GET` | `/api/meetings/{id}` | 取得完整會議資料 |
@@ -335,32 +368,39 @@ processing ──▶ completed
 ### 5.1 一步驟上傳 + 處理流程
 
 ```
-使用者選擇音檔（+ 選填標題 + 選擇 Provider）→ 按下「開始」
+使用者選擇音檔（必要）+ TextGrid/RTTM（選填）+ 選擇 Provider → 按下「開始」
 → 前端驗證格式/大小，前端透過瀏覽器 API 取得音檔時長
-→ POST /api/meetings/upload-and-process?mode=remote
-→ 後端驗證（MIME type、大小）
-→ 儲存至 uploads/
-→ 寫入 DB（status: processing, provider=remote|local, duration=前端傳來的時長）
+→ POST /api/meetings/upload-and-process?mode=remote&skip_transcription=false
+   body: file(必要), textgrid(選填), rttm(選填)
+→ 後端驗證所有檔案（MIME type、大小、格式）
+→ 儲存音檔至 uploads/
+→ 若有 TextGrid/RTTM → 儲存並解析 → 寫入 AnnotationFile 表
+→ 寫入 Meeting DB（status: processing, provider=remote|local）
 → 回傳 meeting_id，前端跳轉至結果頁（輪詢模式）
 → 送入 BackgroundTask：
     0. 執行 processor.health_check()，失敗則報錯
-    ┌─────────────────────────────────────────────────┐
-    │  processor.process(file_path)                   │
-    │                                                 │
-    │  ┌─ GeminiProvider ─────────────────────────┐   │
-    │  │ 1. 上傳音檔至 Gemini File API             │   │
-    │  │ 2. 發送多模態 Prompt                      │   │
-    │  │ 3. 解析 JSON → ProcessingResult           │   │
-    │  │    (transcript + summary + action_items)  │   │
-    │  └──────────────────────────────────────────┘   │
-    │                                                 │
-    │  ┌─ LocalWhisperProvider ───────────────────┐   │
-    │  │ 1. Lazy Load Whisper 模型（首次載入後快取） │   │
-    │  │ 2. 轉錄音檔 → 帶時間戳記文字（原始語言）    │   │
-    │  │ 3. 若 Ollama 可用 → 生成摘要 + Actions    │   │
-    │  │ 4. 回傳 ProcessingResult                  │   │
-    │  └──────────────────────────────────────────┘   │
-    └─────────────────────────────────────────────────┘
+    1. 組裝 ProcessingContext：
+       - 若有 TextGrid + skip_transcription=true → context.transcript = 解析結果
+       - 若有 RTTM → context.speakers = 說話者片段
+    ┌─────────────────────────────────────────────────────┐
+    │  processor.process(file_path, context)              │
+    │                                                     │
+    │  ┌─ GeminiProvider ─────────────────────────────┐   │
+    │  │ A) 有 context.transcript（跳過轉錄）：         │   │
+    │  │    → 僅用文字 Prompt 生成摘要 + Actions        │   │
+    │  │ B) 有 context.speakers（RTTM 注入）：          │   │
+    │  │    → 將說話者資訊注入 Prompt                   │   │
+    │  │    → AI 產出帶角色標籤的逐字稿                  │   │
+    │  │ C) 無 context → 照常多模態處理                 │   │
+    │  └──────────────────────────────────────────────┘   │
+    │                                                     │
+    │  ┌─ LocalWhisperProvider ───────────────────────┐   │
+    │  │ A) 有 context.transcript → 跳過 Whisper      │   │
+    │  │ B) 無 context → Whisper 轉錄                  │   │
+    │  │ C) 有 context.speakers → 後處理合併角色標籤    │   │
+    │  │ D) Ollama 摘要（若可用）                       │   │
+    │  └──────────────────────────────────────────────┘   │
+    └─────────────────────────────────────────────────────┘
 → 儲存 ProcessingResult 至 DB
 → 更新 status: completed
 * 失敗時：
@@ -532,7 +572,8 @@ meeting-minutes-ai/
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── audio_service.py        # 音檔上傳、驗證、元資料提取
-│   │   ├── meeting_processor.py    # 協調層：呼叫 Provider 並儲存結果
+│   │   ├── annotation_service.py   # TextGrid/RTTM 解析（獨立 Service）
+│   │   ├── meeting_processor.py    # 協調層：組裝 Context、呼叫 Provider、儲存結果
 │   │   └── providers/
 │   │       ├── __init__.py
 │   │       ├── base.py             # AudioProcessor 抽象介面 + ProcessingResult
@@ -617,7 +658,7 @@ OLLAMA_MODEL=gemma2:9b                # 本地 LLM 模型名稱（Gemma 2 9B）
 
 # === 通用 ===
 UPLOAD_DIR=./uploads
-MAX_FILE_SIZE_MB=100
+MAX_FILE_SIZE_MB=300
 DATABASE_URL=sqlite:///./meeting_minutes.db
 ```
 

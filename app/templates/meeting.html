@@ -64,6 +64,17 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     <span class="text-sm text-gray-400">{{ meeting.provider }} 模式</span>
 </div>
 
+<!-- 標註檔資訊 -->
+{% if meeting.annotation_files %}
+<div class="mb-4 flex gap-2 flex-wrap">
+    {% for af in meeting.annotation_files %}
+    <span class="px-2 py-1 text-xs rounded-full {% if af.file_type == 'textgrid' %}bg-green-100 text-green-700{% else %}bg-purple-100 text-purple-700{% endif %}">
+        {{ af.file_type | upper }}: {{ af.file_name }}
+    </span>
+    {% endfor %}
+</div>
+{% endif %}
+
 <form id="edit-form" class="space-y-8">
     <!-- 逐字稿 -->
     <section>
@@ -79,16 +90,18 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
         <textarea name="summary" rows="8"
                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.summary }}</textarea>
     </section>
-    {% elif meeting.provider == 'local' and not ollama_enabled %}
-    <section>
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p class="text-yellow-700 text-sm">本地模式未配置 Ollama，摘要功能不可用。配置 Ollama 以啟用本地摘要。</p>
-        </div>
-    </section>
     {% else %}
     <section>
-        <h2 class="text-lg font-semibold text-gray-700 mb-3">會議摘要</h2>
-        <div class="bg-gray-50 border rounded-lg p-4 text-gray-500 text-sm">摘要生成失敗</div>
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold text-gray-700">會議摘要</h2>
+            <button type="button" onclick="generateSummary()" id="summarize-btn"
+                    class="text-sm px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400">
+                使用 Ollama 生成摘要
+            </button>
+        </div>
+        <div id="summary-area" class="bg-gray-50 border rounded-lg p-4 text-gray-500 text-sm">
+            尚無摘要，點擊上方按鈕透過 Ollama 生成。
+        </div>
     </section>
     {% endif %}
 
@@ -122,10 +135,6 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
                         class="text-red-400 hover:text-red-600 text-sm">刪除</button>
             </div>
             {% endfor %}
-        </div>
-        {% elif meeting.provider == 'local' and not ollama_enabled %}
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p class="text-yellow-700 text-sm">本地模式未配置 Ollama，Action Items 功能不可用。</p>
         </div>
         {% else %}
         <div id="action-items" class="space-y-3">
@@ -203,6 +212,29 @@ async function deleteAudio() {
     if (!confirm('確定要刪除音檔？文字紀錄將保留。')) return;
     await fetch(`/api/meetings/${meetingId}/audio`, {method: 'DELETE'});
     window.location.reload();
+}
+
+async function generateSummary() {
+    const btn = document.getElementById('summarize-btn');
+    const area = document.getElementById('summary-area');
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    if (area) area.textContent = 'Ollama 摘要生成中，請稍候...';
+
+    try {
+        const resp = await fetch(`/api/meetings/${meetingId}/summarize`, {method: 'POST'});
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || '摘要生成失敗');
+        }
+        window.location.reload();
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = '使用 Ollama 生成摘要';
+        if (area) area.textContent = '錯誤：' + err.message;
+    }
 }
 </script>
 {% endif %}

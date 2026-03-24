@@ -1,7 +1,7 @@
 """MeetingProcessor：協調層，呼叫 Provider 並儲存結果至 DB。
 
-在 BackgroundTask 中執行，自行建立獨立的資料庫 Session，
-避免與 request scope 的 Session 生命週期衝突。
+在 BackgroundTask 中執行，自行建立獨立的資料庫 Session。
+負責組裝 ProcessingContext（TextGrid/RTTM）並傳入 Provider。
 """
 
 import logging
@@ -14,7 +14,7 @@ from app.core.exceptions import (
 )
 from app.database import async_session
 from app.models.database_models import ActionItem, Meeting, MeetingStatus
-from app.services.providers.base import AudioProcessor
+from app.services.providers.base import AudioProcessor, ProcessingContext
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 async def process_meeting(
     meeting_id: str,
     processor: AudioProcessor,
+    context: ProcessingContext | None = None,
 ) -> None:
     """執行 AI 處理並儲存結果至資料庫。
 
@@ -30,6 +31,7 @@ async def process_meeting(
     Args:
         meeting_id: 會議紀錄 ID。
         processor: AudioProcessor 實例。
+        context: 標註檔上下文（TextGrid/RTTM），可選。
     """
     async with async_session() as db:
         meeting = await db.get(Meeting, meeting_id)
@@ -47,12 +49,12 @@ async def process_meeting(
                 await db.commit()
                 return
 
-            # 執行 AI 處理
+            # 執行 AI 處理（傳入 context）
             logger.info(
                 f"開始處理 Meeting {meeting_id}"
                 f"（Provider: {processor.get_provider_name()}）"
             )
-            result = await processor.process(meeting.file_path)
+            result = await processor.process(meeting.file_path, context)
 
             # 儲存結果
             meeting.transcript = result.transcript

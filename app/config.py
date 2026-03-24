@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # === Gemini（遠端模式）===
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
 
     # === Whisper（本地模式）===
     WHISPER_MODEL: str = "base"
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # === 通用 ===
     UPLOAD_DIR: str = "./uploads"
-    MAX_FILE_SIZE_MB: int = 100
+    MAX_FILE_SIZE_MB: int = 300
     DATABASE_URL: str = "sqlite+aiosqlite:///./meeting_minutes.db"
 
     @property

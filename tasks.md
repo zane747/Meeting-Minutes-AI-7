@@ -98,7 +98,7 @@
 
 - [ ] **T-14** 實作 AudioService
   - 實作 `app/services/audio_service.py`：
-    - `validate_file()`：驗證檔案格式（mp3/wav）與大小（≤ 100MB）
+    - `validate_file()`：驗證檔案格式（mp3/wav/flac）與大小（≤ 300MB）
     - `save_file()`：儲存至 uploads/ 目錄
     - `get_duration()`：使用 pydub 取得音檔時長
     - `delete_audio_file()`：刪除音檔，更新 DB file_path 為 null
@@ -234,6 +234,70 @@
 
 ---
 
+## Phase 9：標註檔支援（TextGrid / RTTM / FLAC）
+
+- [ ] **T-33** 擴充 AudioProcessor 介面
+  - 在 `app/services/providers/base.py` 新增 `ProcessingContext` dataclass
+  - 修改 `AudioProcessor.process()` 簽名：`process(file_path, context=None)`
+  - 更新 GeminiProvider 與 LocalWhisperProvider 的 `process()` 接受 context
+
+- [ ] **T-34** 新增 AnnotationFile DB 模型
+  - 在 `app/models/database_models.py` 新增 `AnnotationFile` 模型
+  - 欄位：id, meeting_id, file_type, file_name, file_path, parsed_data
+  - Meeting 新增 `annotation_files` relationship
+
+- [ ] **T-35** 擴充音檔格式支援
+  - `audio_service.py`：ALLOWED_EXTENSIONS 新增 `.flac`
+  - ALLOWED_MIME_TYPES 新增 `audio/flac`
+  - 新增 `validate_annotation_file()` 驗證 `.TextGrid` / `.rttm`
+  - 新增 `save_annotation_file()` 儲存標註檔
+
+- [ ] **T-36** 實作 AnnotationService
+  - 新建 `app/services/annotation_service.py`
+  - `parse_textgrid(file_path)` → 解析 interval tiers → 帶時間戳記逐字稿
+  - `parse_rttm(file_path)` → 解析說話者片段 → `[{speaker, start, end}]`
+  - `merge_transcript_with_speakers(transcript, speakers)` → 合併角色標籤
+
+- [ ] **T-37** 更新 GeminiProvider 支援 context
+  - 有 `context.transcript` + `skip_transcription` → 僅用文字 Prompt 做摘要
+  - 有 `context.speakers` → 將 RTTM 說話者資訊注入 Prompt
+  - 無 context → 照常多模態處理（不變）
+
+- [ ] **T-38** 更新 LocalWhisperProvider 支援 context
+  - 有 `context.transcript` + `skip_transcription` → 跳過 Whisper
+  - 有 `context.speakers` → 後處理合併角色標籤至 Whisper 逐字稿
+  - 無 context → 照常 Whisper 轉錄（不變）
+
+- [ ] **T-39** 更新 MeetingProcessor 協調層
+  - 接收 TextGrid/RTTM 解析結果
+  - 組裝 `ProcessingContext`
+  - 傳入 `processor.process(file_path, context)`
+  - 儲存 AnnotationFile 紀錄至 DB
+
+- [ ] **T-40** 更新 upload-and-process API
+  - 新增參數：`textgrid: UploadFile | None = None`, `rttm: UploadFile | None = None`
+  - 新增參數：`skip_transcription: bool = False`
+  - 驗證：音檔必要，標註檔選填
+  - 儲存標註檔 → 呼叫 AnnotationService 解析 → 傳入 BackgroundTask
+
+- [ ] **T-41** 更新前端 index.html
+  - 新增 TextGrid 檔案選擇器（選填）
+  - 新增 RTTM 檔案選擇器（選填）
+  - 有 TextGrid 時顯示選項：「使用 TextGrid 逐字稿」/「重新 AI 轉錄」
+  - 更新 accept 屬性支援 .flac
+  - 更新 FormData 包含所有檔案
+
+- [ ] **T-42** 更新結果頁 meeting.html
+  - 若有 RTTM → 逐字稿中以不同顏色/樣式顯示 Speaker 標籤
+  - 若有 AnnotationFile → 顯示已匯入的標註檔資訊
+
+- [ ] **T-43** 撰寫 AnnotationService 單元測試
+  - 測試 TextGrid 解析（正常/異常格式）
+  - 測試 RTTM 解析（正常/異常格式）
+  - 測試 transcript + speakers 合併邏輯
+
+---
+
 ## 任務依賴關係
 
 ```
@@ -245,6 +309,7 @@ Phase 1（T-01~T-04）
                                     └──▶ Phase 6（T-22~T-26）
 Phase 3 完成後可同步開始 ──▶ Phase 7（T-27~T-30）
 所有 Phase 完成後 ──▶ Phase 8（T-31~T-32）
+Phase 8 完成後 ──▶ Phase 9（T-33~T-43）標註檔支援
 ```
 
 ---
@@ -261,4 +326,5 @@ Phase 3 完成後可同步開始 ──▶ Phase 7（T-27~T-30）
 | Phase 6 | 5 | 前端模板 |
 | Phase 7 | 4 | 測試 |
 | Phase 8 | 2 | 收尾 |
-| **合計** | **32** | |
+| **Phase 9** | **11** | **標註檔支援（TextGrid/RTTM/FLAC）** |
+| **合計** | **43** | |

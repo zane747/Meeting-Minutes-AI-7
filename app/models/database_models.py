@@ -48,6 +48,9 @@ class Meeting(Base):
     action_items: Mapped[list["ActionItem"]] = relationship(
         back_populates="meeting", cascade="all, delete-orphan"
     )
+    annotation_files: Mapped[list["AnnotationFile"]] = relationship(
+        back_populates="meeting", cascade="all, delete-orphan"
+    )
 
 
 class ActionItem(Base):
@@ -67,3 +70,22 @@ class ActionItem(Base):
     is_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="action_items")
+
+
+class AnnotationFile(Base):
+    """標註檔案資料模型（TextGrid / RTTM）。"""
+
+    __tablename__ = "annotation_files"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False
+    )
+    file_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    parsed_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    meeting: Mapped["Meeting"] = relationship(back_populates="annotation_files")
