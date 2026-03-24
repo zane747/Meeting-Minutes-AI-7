@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}
+{% if meeting and meeting.title %}{{ meeting.title }}{% else %}處理中{% endif %} - Meeting Minutes AI
+{% endblock %}
+
+{% block content %}
+{% if not meeting %}
+<div class="text-center py-12">
+    <p class="text-red-600 text-lg">{{ error }}</p>
+    <a href="/meetings" class="mt-4 inline-block text-blue-600 hover:underline">返回歷史紀錄</a>
+</div>
+{% elif meeting.status.value == 'processing' %}
+<!-- 處理中 -->
+<div id="status-area"
+     hx-get="/api/meetings/{{ meeting.id }}/status"
+     hx-trigger="every 2s"
+     hx-swap="innerHTML"
+     class="text-center py-16">
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+    <p class="text-lg text-gray-600">AI 處理中...</p>
+    <p class="text-sm text-gray-400 mt-1">使用 {{ meeting.provider }} 模式</p>
+</div>
+
+<script>
+// 輪詢：當狀態變為 completed 或 failed 時重新載入頁面
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    if (e.detail.target.id === 'status-area') {
+        try {
+            const data = JSON.parse(e.detail.xhr.responseText);
+            if (data.status !== 'processing') {
+                window.location.reload();
+            }
+        } catch(err) {}
+    }
+});
+</script>
+
+{% elif meeting.status.value == 'failed' %}
+<!-- 失敗 -->
+<div class="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
+    <h2 class="text-lg font-semibold text-red-700 mb-2">處理失敗</h2>
+    <p class="text-red-600">{{ meeting.error_message }}</p>
+    <div class="mt-4 flex gap-3">
+        <form method="POST" action="/api/meetings/{{ meeting.id }}/retry?mode=remote" class="inline">
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+                使用遠端模式重試
+            </button>
+        </form>
+        <form method="POST" action="/api/meetings/{{ meeting.id }}/retry?mode=local" class="inline">
+            <button type="submit" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">
+                使用本地模式重試
+            </button>
+        </form>
+    </div>
+</div>
+
+{% elif meeting.status.value == 'completed' %}
+<!-- 完成 -->
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-800">
+        {{ meeting.title or meeting.file_name }}
+    </h1>
+    <span class="text-sm text-gray-400">{{ meeting.provider }} 模式</span>
+</div>
+
+<form id="edit-form" class="space-y-8">
+    <!-- 逐字稿 -->
+    <section>
+        <h2 class="text-lg font-semibold text-gray-700 mb-3">逐字稿</h2>
+        <textarea name="transcript" rows="12"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.transcript or '' }}</textarea>
+    </section>
+
+    <!-- 摘要 -->
+    {% if meeting.summary %}
+    <section>
+        <h2 class="text-lg font-semibold text-gray-700 mb-3">會議摘要</h2>
+        <textarea name="summary" rows="8"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.summary }}</textarea>
+    </section>
+    {% elif meeting.provider == 'local' and not ollama_enabled %}
+    <section>
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p class="text-yellow-700 text-sm">本地模式未配置 Ollama，摘要功能不可用。配置 Ollama 以啟用本地摘要。</p>
+        </div>
+    </section>
+    {% else %}
+    <section>
+        <h2 class="text-lg font-semibold text-gray-700 mb-3">會議摘要</h2>
+        <div class="bg-gray-50 border rounded-lg p-4 text-gray-500 text-sm">摘要生成失敗</div>
+    </section>
+    {% endif %}
+
+    <!-- Action Items -->
+    <section>
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold text-gray-700">Action Items</h2>
+            <button type="button" onclick="addActionItem()"
+                    class="text-sm px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">
+                新增
+            </button>
+        </div>
+
+        {% if meeting.action_items %}
+        <div id="action-items" class="space-y-3">
+            {% for item in meeting.action_items %}
+            <div class="flex items-start gap-3 p-3 bg-white border rounded-lg" data-id="{{ item.id }}">
+                <input type="checkbox" {% if item.is_completed %}checked{% endif %}
+                       onchange="toggleAction('{{ item.id }}', this.checked)"
+                       class="mt-1">
+                <div class="flex-1">
+                    <p class="{% if item.is_completed %}line-through text-gray-400{% else %}text-gray-800{% endif %}">
+                        {{ item.description }}
+                    </p>
+                    <div class="flex gap-4 text-xs text-gray-500 mt-1">
+                        {% if item.assignee %}<span>負責人：{{ item.assignee }}</span>{% endif %}
+                        {% if item.due_date %}<span>截止：{{ item.due_date }}</span>{% endif %}
+                    </div>
+                </div>
+                <button type="button" onclick="deleteAction('{{ meeting.id }}', '{{ item.id }}')"
+                        class="text-red-400 hover:text-red-600 text-sm">刪除</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% elif meeting.provider == 'local' and not ollama_enabled %}
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p class="text-yellow-700 text-sm">本地模式未配置 Ollama，Action Items 功能不可用。</p>
+        </div>
+        {% else %}
+        <div id="action-items" class="space-y-3">
+            <p class="text-gray-400 text-sm">沒有待辦事項</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <!-- 儲存按鈕 -->
+    <div class="flex gap-3">
+        <button type="button" onclick="saveMeeting()"
+                class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700">
+            儲存
+        </button>
+        {% if meeting.file_path %}
+        <button type="button" onclick="deleteAudio()"
+                class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">
+            刪除音檔
+        </button>
+        {% endif %}
+    </div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if meeting and meeting.status.value == 'completed' %}
+<script>
+const meetingId = '{{ meeting.id }}';
+
+async function saveMeeting() {
+    const form = document.getElementById('edit-form');
+    const transcript = form.querySelector('[name="transcript"]')?.value;
+    const summary = form.querySelector('[name="summary"]')?.value;
+
+    const resp = await fetch(`/api/meetings/${meetingId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({transcript, summary}),
+    });
+
+    if (resp.ok) {
+        alert('儲存成功');
+    } else {
+        alert('儲存失敗');
+    }
+}
+
+async function toggleAction(actionId, completed) {
+    await fetch(`/api/meetings/${meetingId}/actions/${actionId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({is_completed: completed}),
+    });
+    window.location.reload();
+}
+
+async function deleteAction(meetingId, actionId) {
+    if (!confirm('確定要刪除此 Action Item？')) return;
+    await fetch(`/api/meetings/${meetingId}/actions/${actionId}`, {method: 'DELETE'});
+    window.location.reload();
+}
+
+function addActionItem() {
+    const desc = prompt('輸入待辦事項描述：');
+    if (!desc) return;
+    fetch(`/api/meetings/${meetingId}/actions`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({description: desc}),
+    }).then(() => window.location.reload());
+}
+
+async function deleteAudio() {
+    if (!confirm('確定要刪除音檔？文字紀錄將保留。')) return;
+    await fetch(`/api/meetings/${meetingId}/audio`, {method: 'DELETE'});
+    window.location.reload();
+}
+</script>
+{% endif %}
+{% endblock %}

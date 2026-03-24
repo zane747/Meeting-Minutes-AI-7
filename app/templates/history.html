@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}歷史紀錄 - Meeting Minutes AI{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-800 mb-6">歷史紀錄</h1>
+
+{% if meetings %}
+<div class="space-y-3">
+    {% for m in meetings %}
+    <div class="bg-white border rounded-lg p-4 flex items-center justify-between hover:shadow-sm transition">
+        <a href="/meetings/{{ m.id }}" class="flex-1">
+            <div class="flex items-center gap-4">
+                <div class="flex-1">
+                    <h3 class="font-semibold text-gray-800">
+                        {{ m.title or m.file_name }}
+                    </h3>
+                    <div class="flex gap-4 text-xs text-gray-500 mt-1">
+                        <span>{{ m.file_name }}</span>
+                        {% if m.duration > 0 %}
+                        <span>{{ (m.duration // 60) | int }}:{{ '%02d' | format((m.duration % 60) | int) }}</span>
+                        {% endif %}
+                        <span>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <!-- 狀態標籤 -->
+                    {% if m.status.value == 'completed' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">完成</span>
+                    {% elif m.status.value == 'processing' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">處理中</span>
+                    {% elif m.status.value == 'failed' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">失敗</span>
+                    {% endif %}
+                    <!-- Provider -->
+                    <span class="text-xs text-gray-400">{{ m.provider or '' }}</span>
+                </div>
+            </div>
+        </a>
+        <button onclick="deleteMeeting('{{ m.id }}')"
+                class="ml-4 text-red-400 hover:text-red-600 text-sm">
+            刪除
+        </button>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-16">
+    <p class="text-gray-400 text-lg mb-4">還沒有會議紀錄</p>
+    <a href="/" class="text-blue-600 hover:underline">上傳第一個音檔</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function deleteMeeting(id) {
+    if (!confirm('確定要刪除此會議紀錄？此操作無法復原。')) return;
+    const resp = await fetch(`/api/meetings/${id}`, {method: 'DELETE'});
+    if (resp.ok) {
+        window.location.reload();
+    } else {
+        alert('刪除失敗');
+    }
+}
+</script>
+{% endblock %}

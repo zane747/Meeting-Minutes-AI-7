@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Meeting Minutes AI{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold text-gray-800">Meeting Minutes AI</a>
+            <div class="flex gap-4">
+                <a href="/" class="text-gray-600 hover:text-gray-900">上傳</a>
+                <a href="/meetings" class="text-gray-600 hover:text-gray-900">歷史紀錄</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-5xl mx-auto px-4 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

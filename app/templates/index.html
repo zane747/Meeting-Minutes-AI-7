@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}上傳音檔 - Meeting Minutes AI{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">上傳會議錄音</h1>
+
+    <form id="upload-form" enctype="multipart/form-data" class="space-y-6">
+        <!-- 檔案選擇 -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">選擇音檔</label>
+            <input type="file" id="file-input" name="file" accept=".mp3,.wav"
+                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                   required>
+            <p id="file-info" class="mt-2 text-sm text-gray-500 hidden"></p>
+            <p id="file-error" class="mt-2 text-sm text-red-600 hidden"></p>
+        </div>
+
+        <!-- 會議標題 -->
+        <div>
+            <label for="title" class="block text-sm font-medium text-gray-700 mb-2">
+                會議標題 <span class="text-gray-400">（選填，AI 可自動生成）</span>
+            </label>
+            <input type="text" id="title" name="title" placeholder="例如：週會、專案討論..."
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Provider 選擇 -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">處理模式</label>
+            <div class="flex gap-6">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="mode" value="remote"
+                           {% if default_mode == 'remote' %}checked{% endif %}
+                           class="text-blue-600">
+                    <span class="text-sm">遠端（Gemini API）</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="mode" value="local"
+                           {% if default_mode == 'local' %}checked{% endif %}
+                           class="text-blue-600">
+                    <span class="text-sm">本地端（Whisper + Ollama）</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Hidden duration field -->
+        <input type="hidden" id="duration" name="duration" value="0">
+
+        <!-- 送出按鈕 -->
+        <button type="submit" id="submit-btn"
+                class="w-full py-3 px-4 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition">
+            開始
+        </button>
+
+        <!-- 進度 -->
+        <div id="progress" class="hidden">
+            <div class="w-full bg-gray-200 rounded-full h-2">
+                <div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+            </div>
+            <p id="progress-text" class="text-sm text-gray-500 mt-2 text-center">上傳中...</p>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const fileInput = document.getElementById('file-input');
+const fileInfo = document.getElementById('file-info');
+const fileError = document.getElementById('file-error');
+const durationInput = document.getElementById('duration');
+const form = document.getElementById('upload-form');
+const submitBtn = document.getElementById('submit-btn');
+const progress = document.getElementById('progress');
+const progressBar = document.getElementById('progress-bar');
+const progressText = document.getElementById('progress-text');
+const maxSizeMB = {{ max_file_size_mb }};
+
+// 檔案選擇時顯示資訊
+fileInput.addEventListener('change', function() {
+    const file = this.files[0];
+    fileError.classList.add('hidden');
+    fileInfo.classList.add('hidden');
+
+    if (!file) return;
+
+    // 驗證格式
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['mp3', 'wav'].includes(ext)) {
+        fileError.textContent = '不支援的檔案格式，僅支援 .mp3、.wav';
+        fileError.classList.remove('hidden');
+        this.value = '';
+        return;
+    }
+
+    // 驗證大小
+    const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+    if (file.size > maxSizeMB * 1024 * 1024) {
+        fileError.textContent = `檔案大小 ${sizeMB}MB 超過上限 ${maxSizeMB}MB`;
+        fileError.classList.remove('hidden');
+        this.value = '';
+        return;
+    }
+
+    // 取得時長
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(file);
+    audio.addEventListener('loadedmetadata', function() {
+        const mins = Math.floor(audio.duration / 60);
+        const secs = Math.floor(audio.duration % 60);
+        durationInput.value = audio.duration;
+        fileInfo.textContent = `${file.name} | ${sizeMB} MB | ${mins}:${secs.toString().padStart(2, '0')}`;
+        fileInfo.classList.remove('hidden');
+        URL.revokeObjectURL(audio.src);
+    });
+});
+
+// 表單提交
+form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    submitBtn.disabled = true;
+    progress.classList.remove('hidden');
+    progressBar.style.width = '30%';
+    progressText.textContent = '上傳中...';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('duration', durationInput.value);
+
+    const title = document.getElementById('title').value;
+    if (title) formData.append('title', title);
+
+    const mode = document.querySelector('input[name="mode"]:checked').value;
+
+    try {
+        progressBar.style.width = '60%';
+        progressText.textContent = '處理中...';
+
+        const resp = await fetch(`/api/meetings/upload-and-process?mode=${mode}`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || '上傳失敗');
+        }
+
+        const data = await resp.json();
+        progressBar.style.width = '100%';
+        progressText.textContent = '已送出，跳轉中...';
+
+        window.location.href = `/meetings/${data.meeting_id}`;
+    } catch (err) {
+        fileError.textContent = err.message;
+        fileError.classList.remove('hidden');
+        submitBtn.disabled = false;
+        progress.classList.add('hidden');
+    }
+});
+</script>
+{% endblock %}

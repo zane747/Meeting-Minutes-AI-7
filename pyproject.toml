@@ -1,0 +1,41 @@
+[project]
+name = "meeting-minutes-ai"
+version = "0.1.0"
+description = "AI 驅動的會議紀錄應用程式，支援語音辨識、自動摘要與結構化輸出"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "jinja2",
+    "sqlalchemy",
+    "aiosqlite",
+    "pydantic-settings",
+    "pydub",
+    "python-dotenv",
+    "google-generativeai",
+    "httpx",
+]
+
+[project.optional-dependencies]
+local = ["openai-whisper"]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
