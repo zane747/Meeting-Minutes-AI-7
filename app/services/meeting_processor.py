@@ -157,16 +157,21 @@ async def process_meeting(
                 await _update_progress(meeting_id, 60, "生成摘要中...", db)
                 from app.services import ollama_service
 
+                async def _progress_cb(pct: int, stage: str) -> None:
+                    await _update_progress(meeting_id, pct, stage, db)
+
                 # auto/true 模式需要 GPU lock 保護
                 gpu_mode = settings.OLLAMA_GPU.lower()
                 if gpu_mode in ("auto", "true"):
                     async with DeviceManager.get_gpu_lock():
                         summary_result = await ollama_service.generate_summary(
-                            result.transcript
+                            result.transcript,
+                            progress_callback=_progress_cb,
                         )
                 else:
                     summary_result = await ollama_service.generate_summary(
-                        result.transcript
+                        result.transcript,
+                        progress_callback=_progress_cb,
                     )
 
                 if summary_result:

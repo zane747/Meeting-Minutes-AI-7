@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     OLLAMA_ENABLED: bool = False
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b"
-    OLLAMA_NUM_CTX: int = 16384
+    OLLAMA_NUM_CTX: int = 32768
     OLLAMA_NUM_THREAD: int = 0  # 0 = 自動（Ollama 預設），建議設為 CPU 核心數如 16
     OLLAMA_GPU: str = "auto"  # "auto" = 自動偵測 | "true" = 強制 GPU | "false" = 強制 CPU
 

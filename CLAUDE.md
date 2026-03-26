@@ -4,6 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-26
 
 ## Active Technologies
 - Python 3.11 + FastAPI, httpx, SQLAlchemy (aiosqlite), pydantic-settings, PyTorch (CUDA) (003-ollama-gpu-boost)
+- SQLite (aiosqlite) — 不新增資料表 (004-chunked-summary)
 
 - Python 3.11 + FastAPI, OpenAI Whisper, pyannote.audio, PyTorch (CUDA), Ollama (REST API), SQLAlchemy (001-gpu-acceleration)
 - SQLite (aiosqlite) (001-gpu-acceleration)
@@ -36,10 +37,10 @@ cd src; pytest; ruff check .
 Python: Follow standard conventions
 
 ## Recent Changes
+- 004-chunked-summary: Added Python 3.11 + FastAPI, httpx, SQLAlchemy (aiosqlite), pydantic-settings, PyTorch (CUDA)
 - 003-ollama-gpu-boost: Added Python 3.11 + FastAPI, httpx, SQLAlchemy (aiosqlite), pydantic-settings, PyTorch (CUDA)
 
 - 002-gpu-cpu-workload-split: GPU/CPU workload split — Whisper+Diarization on GPU, Ollama defaults to CPU (configurable via OLLAMA_GPU)
-- 001-gpu-acceleration: Added Python 3.11 + FastAPI, OpenAI Whisper, pyannote.audio, PyTorch (CUDA), Ollama (REST API), SQLAlchemy
 
 <!-- MANUAL ADDITIONS START -->
 
