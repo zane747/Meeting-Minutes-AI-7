@@ -24,6 +24,8 @@ class ProcessingContext:
     transcript: str | None = None
     speakers: list[dict] | None = None
     skip_transcription: bool = False
+    diarization_enabled: bool = False
+    num_speakers: int | None = None
 
 
 @dataclass
@@ -41,6 +43,10 @@ class ProcessingResult:
     transcript: str = ""
     summary: str = ""
     action_items: list[dict] = field(default_factory=list)
+    speakers: list[dict] = field(default_factory=list)
+    utterances: list[dict] = field(default_factory=list)
+    diarization_warning: str | None = None
+    semantic_analysis: dict | None = None
 
 
 class AudioProcessor(ABC):

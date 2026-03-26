@@ -28,6 +28,7 @@ async def index(request: Request) -> HTMLResponse:
         context={
             "default_mode": settings.MODEL_MODE,
             "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
+            "diarization_enabled": settings.DIARIZATION_ENABLED,
         },
     )
 
@@ -62,6 +63,8 @@ async def meeting_detail(
         .options(
             selectinload(Meeting.action_items),
             selectinload(Meeting.annotation_files),
+            selectinload(Meeting.speakers),
+            selectinload(Meeting.topics),
         )
         .where(Meeting.id == meeting_id)
     )
@@ -80,5 +83,7 @@ async def meeting_detail(
         context={
             "meeting": meeting,
             "ollama_enabled": settings.OLLAMA_ENABLED,
+            "speakers": meeting.speakers,
+            "topics": meeting.topics,
         },
     )

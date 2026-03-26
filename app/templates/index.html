@@ -1,3 +1,17 @@
+<!--
+  ==================== 學習備註 ====================
+  【模板繼承 (Template Inheritance)】
+  這個檔案使用 Jinja2 模板引擎（FastAPI 搭配的模板系統）。
+  - {% extends "base.html" %} → 繼承 base.html 的版面（像套用一個外框）
+  - {% block title %} → 填入外框中「title」這個洞
+  - {% block content %} → 填入外框中「content」這個洞
+  這樣每個頁面只需要寫「不同的部分」，共用的 header/footer 放在 base.html。
+
+  【資料傳遞的起點】
+  這個頁面是「前端」—— 使用者看到的畫面。
+  使用者在這裡填寫表單 → JavaScript 收集資料 → 發送 HTTP 請求到後端。
+  ================================================
+-->
 {% extends "base.html" %}
 
 {% block title %}上傳音檔 - Meeting Minutes AI{% endblock %}
@@ -6,10 +20,25 @@
 <div class="max-w-xl mx-auto">
     <h1 class="text-2xl font-bold text-gray-800 mb-6">上傳會議錄音</h1>
 
+    <!--
+      【HTML 表單 (Form)】
+      - id="upload-form" → 給 JavaScript 用來抓取這個表單元素
+      - enctype="multipart/form-data" → 告訴瀏覽器「這個表單會傳檔案」
+        （如果沒加這個，檔案傳不過去！只有文字能傳）
+      - class="space-y-6" → Tailwind CSS 的樣式，讓子元素之間有間距
+    -->
     <form id="upload-form" enctype="multipart/form-data" class="space-y-6">
         <!-- 音檔選擇（必要） -->
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-2">音檔 <span class="text-red-500">*</span></label>
+            <!--
+              【檔案上傳 input】
+              - type="file" → 讓使用者選檔案
+              - name="file" → 【重要！】這個 name 要跟後端參數名稱對應
+                後端的 upload_and_process(file: UploadFile) 的 "file" 就是對應這裡
+              - accept=".mp3,.wav,.flac" → 限制只能選這些格式（但只是提示，不是真正的驗證）
+              - required → HTML 原生驗證，必填
+            -->
             <input type="file" id="file-input" name="file" accept=".mp3,.wav,.flac"
                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                    required>
@@ -17,6 +46,12 @@
             <p id="file-error" class="mt-2 text-sm text-red-600 hidden"></p>
         </div>
 
+        <!--
+          【選填欄位】
+          沒有 required 屬性，使用者可以不選。
+          name="textgrid" → 對應後端的 textgrid: UploadFile | None = None
+          「| None = None」表示「可以是 None，預設值也是 None」→ 就是選填的意思
+        -->
         <!-- TextGrid（選填） -->
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-2">
@@ -26,6 +61,12 @@
                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100">
         </div>
 
+        <!--
+          【條件顯示 (Conditional Display)】
+          class="hidden" → 一開始隱藏。當使用者選了 TextGrid 檔案後，
+          JavaScript 會移除 "hidden" class 讓它顯示出來。
+          這是前端常見的互動模式：用 CSS class 控制顯示/隱藏。
+        -->
         <!-- TextGrid 選項（有 TextGrid 時顯示） -->
         <div id="textgrid-options" class="hidden bg-green-50 border border-green-200 rounded-lg p-4">
             <label class="block text-sm font-medium text-green-800 mb-2">TextGrid 處理方式</label>
@@ -50,6 +91,45 @@
                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100">
         </div>
 
+        <!--
+          【Jinja2 模板語法 + 後端傳值】
+          {% if diarization_enabled %}checked{% endif %}
+          這段不是 JavaScript！是 Jinja2 模板語法，在「伺服器端」執行。
+          流程：後端 Python 把 diarization_enabled 變數傳進來
+                → Jinja2 判斷：如果是 True，就在 HTML 裡加上 "checked"
+                → 瀏覽器收到的 HTML 已經是處理過的結果
+          這是「後端 → 前端」的資料傳遞方式之一（Server-Side Rendering）。
+        -->
+        <!-- 說話者辨識（選填） -->
+        <div>
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="diarization-toggle" name="enable_diarization"
+                       {% if diarization_enabled %}checked{% endif %}
+                       class="text-indigo-600 rounded">
+                <span class="text-sm font-medium text-gray-700">啟用說話者辨識</span>
+                <span class="text-gray-400 text-xs">（自動辨識誰在發言）</span>
+            </label>
+        </div>
+
+        <!-- 說話者辨識選項 -->
+        <div id="diarization-options" class="hidden bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+            <label class="block text-sm font-medium text-indigo-800 mb-2">說話者人數</label>
+            <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="speaker_mode" value="auto" checked class="text-indigo-600">
+                    <span class="text-sm">自動偵測</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="speaker_mode" value="manual" class="text-indigo-600">
+                    <span class="text-sm">指定人數</span>
+                    <input type="number" id="num-speakers" name="num_speakers" min="2" max="20" value="2"
+                           disabled
+                           class="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center disabled:bg-gray-100">
+                    <span class="text-sm text-gray-500">人</span>
+                </label>
+            </div>
+        </div>
+
         <!-- 會議標題 -->
         <div>
             <label for="title" class="block text-sm font-medium text-gray-700 mb-2">
@@ -59,6 +139,13 @@
                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
         </div>
 
+        <!--
+          【Radio Button（單選）】
+          同一組 radio 的 name 必須相同（這裡都是 name="mode"）。
+          使用者只能選一個。value 是選中時會傳給後端的值。
+          {% if default_mode == 'remote' %}checked{% endif %}
+          → 後端傳來 default_mode 變數，決定預設選哪一個。
+        -->
         <!-- Provider 選擇 -->
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-2">處理模式</label>
@@ -78,7 +165,12 @@
             </div>
         </div>
 
-        <!-- Hidden duration field -->
+        <!--
+          【Hidden Field（隱藏欄位）】
+          使用者看不到這個欄位，但它會跟著表單一起送出。
+          用途：JavaScript 計算出音檔時長後，把值塞進這裡，
+          這樣送出表單時就能把時長一起傳給後端。
+        -->
         <input type="hidden" id="duration" name="duration" value="0">
 
         <!-- 送出按鈕 -->
@@ -100,6 +192,18 @@
 
 {% block scripts %}
 <script>
+// ==================== 學習備註 ====================
+// 【JavaScript 的角色】
+// HTML 負責「畫面結構」，CSS 負責「外觀」，JavaScript 負責「互動行為」。
+// 這裡的 JS 做三件事：
+//   1. 前端驗證（檔案格式、大小）— 不用等後端回應，體驗更好
+//   2. UI 互動（顯示/隱藏選項）
+//   3. 收集表單資料 → 發送 HTTP 請求到後端 API
+// ================================================
+
+// 【抓取 DOM 元素】
+// document.getElementById('xxx') 是用 id 找到 HTML 元素，存成變數方便後續操作。
+// 這就像「給每個東西取綽號」，之後直接用綽號操作它。
 const fileInput = document.getElementById('file-input');
 const textgridInput = document.getElementById('textgrid-input');
 const textgridOptions = document.getElementById('textgrid-options');
@@ -111,24 +215,39 @@ const submitBtn = document.getElementById('submit-btn');
 const progress = document.getElementById('progress');
 const progressBar = document.getElementById('progress-bar');
 const progressText = document.getElementById('progress-text');
+
+// 【Jinja2 注入值到 JavaScript】
+// {{ max_file_size_mb }} 是 Jinja2 語法，後端 Python 會把這個變數的值（例如 500）
+// 直接「印」在 JavaScript 裡。瀏覽器收到的會是：const maxSizeMB = 500;
+// 這也是「後端 → 前端」資料傳遞的方式之一。
 const maxSizeMB = {{ max_file_size_mb }};
 
-// 音檔選擇
+// 【事件監聽器 (Event Listener)】
+// addEventListener('change', ...) 意思是：「當這個 input 的值改變時，執行這個函式」
+// 'change' → 事件類型（還有 'click', 'submit', 'keydown' 等等）
+// 這是前端互動的核心概念：「監聽事件 → 做出反應」
 fileInput.addEventListener('change', function() {
-    const file = this.files[0];
-    fileError.classList.add('hidden');
-    fileInfo.classList.add('hidden');
-    if (!file) return;
+    const file = this.files[0]; // this.files 是使用者選的檔案列表，[0] 取第一個
 
-    const ext = file.name.split('.').pop().toLowerCase();
+    // 先清除之前的提示訊息
+    fileError.classList.add('hidden');  // 加上 'hidden' class → 隱藏
+    fileInfo.classList.add('hidden');
+    if (!file) return; // 使用者沒選檔案就直接結束
+
+    // 【前端驗證 — 檔案格式】
+    // 在前端先檢查，不合格就不送到後端，節省時間和頻寬。
+    // 但注意：前端驗證可以被繞過（使用者可以改 JS），
+    // 所以後端也會再驗證一次（雙重保險）。
+    const ext = file.name.split('.').pop().toLowerCase(); // 取副檔名
     if (!['mp3', 'wav', 'flac'].includes(ext)) {
         fileError.textContent = '不支援的檔案格式，僅支援 .mp3、.wav、.flac';
-        fileError.classList.remove('hidden');
-        this.value = '';
+        fileError.classList.remove('hidden'); // 移除 'hidden' class → 顯示
+        this.value = '';  // 清空選擇
         return;
     }
 
-    const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+    // 【前端驗證 — 檔案大小】
+    const sizeMB = (file.size / 1024 / 1024).toFixed(1); // bytes → MB
     if (file.size > maxSizeMB * 1024 * 1024) {
         fileError.textContent = `檔案大小 ${sizeMB}MB 超過上限 ${maxSizeMB}MB`;
         fileError.classList.remove('hidden');
@@ -136,19 +255,43 @@ fileInput.addEventListener('change', function() {
         return;
     }
 
+    // 【計算音檔時長】
+    // 用瀏覽器內建的 Audio API 讀取音檔的 metadata（不是播放它）。
+    // 算出來的秒數存到隱藏欄位 durationInput，等等會跟表單一起送到後端。
     const audio = new Audio();
-    audio.src = URL.createObjectURL(file);
+    audio.src = URL.createObjectURL(file); // 建立暫時的本地 URL 來讀取檔案
     audio.addEventListener('loadedmetadata', function() {
-        const mins = Math.floor(audio.duration / 60);
-        const secs = Math.floor(audio.duration % 60);
-        durationInput.value = audio.duration;
+        const mins = Math.floor(audio.duration / 60);  // 取整數分鐘
+        const secs = Math.floor(audio.duration % 60);  // 取剩餘秒數
+        durationInput.value = audio.duration;  // ← 塞進隱藏欄位，等等傳給後端
         fileInfo.textContent = `${file.name} | ${sizeMB} MB | ${mins}:${secs.toString().padStart(2, '0')}`;
         fileInfo.classList.remove('hidden');
-        URL.revokeObjectURL(audio.src);
+        URL.revokeObjectURL(audio.src); // 用完就釋放記憶體
     });
 });
 
-// TextGrid 選擇時顯示選項
+// 【UI 互動邏輯】
+// 這些都是「監聽事件 → 控制顯示/隱藏」的模式，很常見。
+const diarizationToggle = document.getElementById('diarization-toggle');
+const diarizationOptions = document.getElementById('diarization-options');
+const numSpeakersInput = document.getElementById('num-speakers');
+
+// checkbox 打勾 → 顯示選項；取消 → 隱藏
+// classList.toggle('hidden', condition) → condition 為 true 時加上 class，false 時移除
+diarizationToggle.addEventListener('change', function() {
+    diarizationOptions.classList.toggle('hidden', !this.checked);
+});
+
+// querySelectorAll → 一次選到「所有」符合條件的元素（回傳陣列）
+// forEach → 對每一個都加上事件監聽
+document.querySelectorAll('input[name="speaker_mode"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        // disabled = true → 使用者不能操作這個 input（灰色狀態）
+        numSpeakersInput.disabled = this.value !== 'manual';
+    });
+});
+
+// TextGrid 選了檔案才顯示處理方式選項
 textgridInput.addEventListener('change', function() {
     if (this.files[0]) {
         textgridOptions.classList.remove('hidden');
@@ -157,57 +300,104 @@ textgridInput.addEventListener('change', function() {
     }
 });
 
-// 表單提交
+// ==================== 核心：表單提交（資料傳遞的關鍵！） ====================
+// 這是整個前端最重要的部分 —— 把使用者填的資料送到後端 API。
+//
+// 【async/await 是什麼？】
+// 發送網路請求需要等待（可能幾秒），async/await 讓你用「看起來像同步」的寫法
+// 來處理「非同步」的操作。await = 「等這件事做完再往下」。
+//
+// 【資料傳遞有兩條路】
+//   1. URL query string: ?mode=local&num_speakers=3 → 適合簡單的設定值
+//   2. Request body (FormData): 檔案、較大的資料 → 適合檔案上傳
+//   後端 FastAPI 會自動從對應的位置取出資料。
+// ======================================================================
 form.addEventListener('submit', async function(e) {
-    e.preventDefault();
+    e.preventDefault(); // 阻止瀏覽器預設的表單提交（預設會整頁重新載入）
 
     const file = fileInput.files[0];
     if (!file) return;
 
-    submitBtn.disabled = true;
-    progress.classList.remove('hidden');
+    // 【UX：回饋使用者目前的狀態】
+    submitBtn.disabled = true;          // 防止重複點擊
+    progress.classList.remove('hidden'); // 顯示進度條
     progressBar.style.width = '30%';
     progressText.textContent = '上傳中...';
 
+    // 【FormData — 打包要傳的資料】
+    // FormData 是瀏覽器提供的 API，可以把「檔案 + 文字」一起打包。
+    // append(key, value) → key 必須跟後端參數名稱對應！
+    //   formData.append('file', file)     → 對應後端的 file: UploadFile
+    //   formData.append('duration', ...)  → 對應後端的 duration: float
+    //   formData.append('title', ...)     → 對應後端的 title: str | None
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('duration', durationInput.value);
+    formData.append('file', file);                // ← 音檔（必要）
+    formData.append('duration', durationInput.value); // ← 音檔時長
 
     const title = document.getElementById('title').value;
-    if (title) formData.append('title', title);
+    if (title) formData.append('title', title);   // ← 有填才傳（選填）
 
-    // 附加 TextGrid
+    // 附加 TextGrid（選填）
     const textgridFile = textgridInput.files[0];
-    if (textgridFile) formData.append('textgrid', textgridFile);
+    if (textgridFile) formData.append('textgrid', textgridFile); // → 對應 textgrid: UploadFile | None
 
-    // 附加 RTTM
+    // 附加 RTTM（選填）
     const rttmFile = document.getElementById('rttm-input').files[0];
-    if (rttmFile) formData.append('rttm', rttmFile);
+    if (rttmFile) formData.append('rttm', rttmFile);  // → 對應 rttm: UploadFile | None
 
+    // 【從 radio button 取值】
+    // querySelector 找到「被選中的」radio，取它的 value
     const mode = document.querySelector('input[name="mode"]:checked').value;
     const skipTranscription = textgridFile
         ? document.querySelector('input[name="skip_transcription"]:checked').value
         : 'false';
 
+    // Diarization 參數
+    const enableDiarization = diarizationToggle.checked; // checkbox 是 true/false
+    const speakerMode = document.querySelector('input[name="speaker_mode"]:checked')?.value;
+    // ?. 是「可選鏈」：如果前面是 null/undefined 就不會報錯，直接回傳 undefined
+    const numSpeakers = (enableDiarization && speakerMode === 'manual')
+        ? numSpeakersInput.value : '0';
+
     try {
         progressBar.style.width = '60%';
-        progressText.textContent = '處理中...';
+        progressText.textContent = enableDiarization ? '上傳中（含說話者辨識）...' : '處理中...';
 
-        const resp = await fetch(`/api/meetings/upload-and-process?mode=${mode}&skip_transcription=${skipTranscription}`, {
+        // 【組裝 URL — query string 傳遞簡單參數】
+        // 這些參數會出現在 URL 的 ? 後面
+        // 後端用 Query(None) 或直接在參數列表中接收
+        let url = `/api/meetings/upload-and-process?mode=${mode}&skip_transcription=${skipTranscription}`;
+        url += `&enable_diarization=${enableDiarization}&num_speakers=${numSpeakers}`;
+
+        // 【fetch — 發送 HTTP 請求！這是資料離開前端的瞬間】
+        // method: 'POST' → HTTP 方法（GET=讀取, POST=新增, PUT=更新, DELETE=刪除）
+        // body: formData  → 請求的「身體」，裡面裝著檔案和文字資料
+        //
+        // 這一行執行後，資料就透過網路送到後端的 FastAPI 了！
+        // 後端的 upload_and_process() 函式會接收到這些資料。
+        const resp = await fetch(url, {
             method: 'POST',
             body: formData,
         });
 
+        // 【處理後端的回應】
+        // resp.ok → HTTP 狀態碼是否在 200-299 之間（代表成功）
         if (!resp.ok) {
-            const err = await resp.json();
+            const err = await resp.json(); // 後端回傳的錯誤訊息（JSON 格式）
             throw new Error(err.detail || '上傳失敗');
         }
 
+        // 【解析後端回傳的 JSON 資料】
+        // 後端回傳：{"meeting_id": "abc-123", "status": "processing"}
+        // resp.json() 把 JSON 字串轉成 JavaScript 物件
         const data = await resp.json();
         progressBar.style.width = '100%';
         progressText.textContent = '已送出，跳轉中...';
+
+        // 【頁面跳轉】— 用後端回傳的 meeting_id 跳到會議詳情頁
         window.location.href = `/meetings/${data.meeting_id}`;
     } catch (err) {
+        // 【錯誤處理】— 顯示錯誤訊息，恢復按鈕可點擊狀態
         fileError.textContent = err.message;
         fileError.classList.remove('hidden');
         submitBtn.disabled = false;

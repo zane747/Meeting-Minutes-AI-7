@@ -15,21 +15,42 @@
 <div id="status-area"
      hx-get="/api/meetings/{{ meeting.id }}/status"
      hx-trigger="every 2s"
-     hx-swap="innerHTML"
-     class="text-center py-16">
-    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-    <p class="text-lg text-gray-600">AI 處理中...</p>
-    <p class="text-sm text-gray-400 mt-1">使用 {{ meeting.provider }} 模式</p>
+     hx-swap="none"
+     class="py-16 max-w-md mx-auto">
+    <div class="text-center mb-6">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p id="progress-stage" class="text-lg text-gray-600">AI 處理中...</p>
+        <p class="text-sm text-gray-400 mt-1">使用 {{ meeting.provider }} 模式</p>
+    </div>
+    <!-- 進度條 -->
+    <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+        <div id="progress-bar"
+             class="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out"
+             style="width: 0%"></div>
+    </div>
+    <p id="progress-percent" class="text-center text-sm text-gray-500 mt-2">0%</p>
 </div>
 
 <script>
-// 輪詢：當狀態變為 completed 或 failed 時重新載入頁面
+// 輪詢：更新進度條，當狀態變為 completed 或 failed 時重新載入頁面
 document.body.addEventListener('htmx:afterRequest', function(e) {
     if (e.detail.target.id === 'status-area') {
         try {
             const data = JSON.parse(e.detail.xhr.responseText);
             if (data.status !== 'processing') {
-                window.location.reload();
+                // 先顯示 100% 再跳轉
+                document.getElementById('progress-bar').style.width = '100%';
+                document.getElementById('progress-percent').textContent = '100%';
+                document.getElementById('progress-stage').textContent = '處理完成，載入結果中...';
+                setTimeout(() => window.location.reload(), 600);
+                return;
+            }
+            // 更新進度條
+            const pct = data.progress || 0;
+            document.getElementById('progress-bar').style.width = pct + '%';
+            document.getElementById('progress-percent').textContent = pct + '%';
+            if (data.progress_stage) {
+                document.getElementById('progress-stage').textContent = data.progress_stage;
             }
         } catch(err) {}
     }
@@ -75,12 +96,87 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
 </div>
 {% endif %}
 
+<!-- 主題目錄（僅在有 topics 資料時顯示） -->
+{% if topics %}
+<div id="topics-panel" class="mb-6 bg-white border border-teal-200 rounded-lg p-4">
+    <h2 class="text-sm font-semibold text-teal-700 mb-3">主題段落</h2>
+    <div class="space-y-1.5">
+        {% for topic in topics | sort(attribute='order_index') %}
+        <div class="flex items-center gap-3 px-3 py-2 rounded hover:bg-teal-50 cursor-pointer transition text-sm"
+             onclick="scrollToTime({{ topic.start_time or 0 }})">
+            <span class="text-teal-500 text-xs whitespace-nowrap">
+                {% if topic.start_time is not none %}
+                {{ '%d:%02d' | format((topic.start_time // 60) | int, (topic.start_time % 60) | int) }}
+                {% endif %}
+            </span>
+            <span class="text-gray-800 font-medium">{{ topic.title }}</span>
+            {% if topic.speakers_involved %}
+            <span class="text-gray-400 text-xs ml-auto">{{ topic.speakers_involved }}</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- 說話者列表（僅在有 speakers 資料時顯示） -->
+{% if speakers %}
+<div id="speakers-panel" class="mb-6 bg-white border border-indigo-200 rounded-lg p-4">
+    <h2 class="text-sm font-semibold text-indigo-700 mb-3">說話者</h2>
+
+    <!-- Diarization 警告 -->
+    <div id="diarization-warning" class="hidden mb-3 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-700"></div>
+
+    <div class="flex flex-wrap gap-2 mb-3">
+        {% for spk in speakers %}
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border rounded-full text-sm group" data-speaker-id="{{ spk.id }}">
+            <span class="w-3 h-3 rounded-full inline-block" style="background-color: {{ spk.color or '#999' }}"></span>
+            <span class="speaker-name" data-speaker-id="{{ spk.id }}">{{ spk.display_name or spk.label }}</span>
+            <button type="button" onclick="renameSpeaker('{{ spk.id }}', '{{ spk.display_name or spk.label }}')"
+                    class="text-gray-400 hover:text-indigo-600 text-xs" title="重新命名">&#9998;</button>
+            <button type="button" onclick="filterBySpeaker('{{ spk.id }}')"
+                    class="text-gray-400 hover:text-blue-600 text-xs" title="篩選此說話者">&#9776;</button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <button type="button" onclick="showAllUtterances()"
+            id="show-all-btn" class="hidden text-xs text-blue-600 hover:underline">
+        顯示全部
+    </button>
+</div>
+{% endif %}
+
 <form id="edit-form" class="space-y-8">
     <!-- 逐字稿 -->
     <section>
-        <h2 class="text-lg font-semibold text-gray-700 mb-3">逐字稿</h2>
-        <textarea name="transcript" rows="12"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.transcript or '' }}</textarea>
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold text-gray-700">逐字稿</h2>
+            {% if speakers %}
+            <div class="flex gap-2">
+                <button type="button" onclick="switchToReadMode()" id="read-mode-btn"
+                        class="text-xs px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200">
+                    閱讀模式
+                </button>
+                <button type="button" onclick="switchToEditMode()" id="edit-mode-btn"
+                        class="text-xs px-3 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200">
+                    編輯模式
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- 說話者訴求摘要（篩選時顯示） -->
+        <div id="speaker-summary" class="hidden"></div>
+
+        <!-- 閱讀模式（從 utterances 動態渲染） -->
+        <div id="transcript-read" class="{% if speakers %}{% else %}hidden{% endif %} w-full border border-gray-200 rounded-md p-4 bg-gray-50 max-h-96 overflow-y-auto space-y-2">
+            <p class="text-sm text-gray-400">載入中...</p>
+        </div>
+
+        <!-- 編輯模式（原始 textarea） -->
+        <textarea name="transcript" id="transcript-edit" rows="12"
+                  class="{% if speakers %}hidden{% endif %} w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.transcript or '' }}</textarea>
     </section>
 
     <!-- 摘要 -->
@@ -213,6 +309,197 @@ async function deleteAudio() {
     await fetch(`/api/meetings/${meetingId}/audio`, {method: 'DELETE'});
     window.location.reload();
 }
+
+// === Speaker & Utterance Functions ===
+
+let allUtterances = [];
+
+async function loadUtterances(speakerId = null) {
+    let url = `/api/meetings/${meetingId}/utterances`;
+    if (speakerId) url += `?speaker_id=${speakerId}`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+
+    const data = await resp.json();
+    if (!speakerId) allUtterances = data;
+    renderUtterances(data, !!speakerId);
+}
+
+// 意圖標籤顏色映射
+const intentColors = {
+    '資訊分享': '#3B82F6', '提議': '#10B981', '提問': '#F59E0B',
+    '回應': '#6366F1', '決議': '#EF4444', '反對': '#DC2626',
+    '補充': '#8B5CF6', '確認': '#14B8A6', '總結': '#F97316',
+};
+function getIntentColor(intent) {
+    return intentColors[intent] || '#6B7280';
+}
+
+function renderUtterances(utterances, isFiltered = false) {
+    const container = document.getElementById('transcript-read');
+    if (!container) return;
+
+    if (utterances.length === 0) {
+        container.innerHTML = '<p class="text-sm text-gray-400">沒有發言資料</p>';
+        return;
+    }
+
+    // 收集可用的意圖標籤
+    const intents = [...new Set(utterances.map(u => u.intent_tag).filter(Boolean))];
+    let filterHtml = '';
+    if (intents.length > 0) {
+        filterHtml = `<div class="flex flex-wrap gap-1.5 mb-3 pb-3 border-b border-gray-200">
+            <span class="text-xs text-gray-500 mr-1">意圖篩選：</span>
+            <button onclick="filterByIntent(null)" class="text-xs px-2 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-600">全部</button>
+            ${intents.map(i => `<button onclick="filterByIntent('${i}')"
+                class="text-xs px-2 py-0.5 rounded hover:opacity-80"
+                style="background-color: ${getIntentColor(i)}15; color: ${getIntentColor(i)}; border: 1px solid ${getIntentColor(i)}30;">${i}</button>`).join('')}
+        </div>`;
+    }
+
+    const utterancesHtml = utterances.map(utt => {
+        const name = utt.speaker_display_name || utt.speaker_label || '';
+        const color = utt.speaker_color || '#999';
+        const startMin = Math.floor(utt.start_time / 60);
+        const startSec = Math.floor(utt.start_time % 60);
+        const endMin = Math.floor(utt.end_time / 60);
+        const endSec = Math.floor(utt.end_time % 60);
+        const timeStr = `${startMin}:${startSec.toString().padStart(2,'0')} - ${endMin}:${endSec.toString().padStart(2,'0')}`;
+        const intentBadge = utt.intent_tag
+            ? `<span class="text-xs px-1.5 py-0.5 rounded"
+                     style="background-color: ${getIntentColor(utt.intent_tag)}15; color: ${getIntentColor(utt.intent_tag)};">${utt.intent_tag}</span>`
+            : '';
+
+        return `<div class="flex gap-2 text-sm leading-relaxed utterance-item" data-intent="${utt.intent_tag || ''}" data-time="${utt.start_time}">
+            <span class="text-gray-400 text-xs mt-0.5 whitespace-nowrap">[${timeStr}]</span>
+            ${name ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium cursor-pointer hover:opacity-80"
+                       style="background-color: ${color}20; color: ${color}; border: 1px solid ${color}40;"
+                       onclick="filterBySpeaker('${utt.speaker_id}')">${name}</span>` : ''}
+            <span class="text-gray-800 flex-1">${utt.text}</span>
+            ${intentBadge}
+        </div>`;
+    }).join('');
+
+    container.innerHTML = filterHtml + utterancesHtml;
+
+    // 顯示/隱藏「顯示全部」按鈕
+    const showAllBtn = document.getElementById('show-all-btn');
+    if (showAllBtn) showAllBtn.classList.toggle('hidden', !isFiltered);
+}
+
+function filterByIntent(intent) {
+    document.querySelectorAll('.utterance-item').forEach(el => {
+        if (!intent || el.dataset.intent === intent) {
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    });
+}
+
+async function filterBySpeaker(speakerId) {
+    await loadUtterances(speakerId);
+
+    // 載入該說話者的訴求摘要
+    const summaryContainer = document.getElementById('speaker-summary');
+    if (summaryContainer && speakerId) {
+        try {
+            const resp = await fetch(`/api/meetings/${meetingId}/speakers`);
+            if (resp.ok) {
+                const speakers = await resp.json();
+                const spk = speakers.find(s => s.id === speakerId);
+                if (spk && spk.key_points) {
+                    summaryContainer.innerHTML = `
+                        <div class="px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-3">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="w-3 h-3 rounded-full" style="background-color: ${spk.color || '#999'}"></span>
+                                <span class="font-medium text-sm text-indigo-800">${spk.display_name || spk.label} 的核心訴求</span>
+                                ${spk.stance ? `<span class="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-600">${spk.stance}</span>` : ''}
+                            </div>
+                            <p class="text-sm text-gray-700">${spk.key_points}</p>
+                        </div>`;
+                    summaryContainer.classList.remove('hidden');
+                } else {
+                    summaryContainer.classList.add('hidden');
+                }
+            }
+        } catch(e) { summaryContainer.classList.add('hidden'); }
+    }
+}
+
+function showAllUtterances() {
+    // 隱藏說話者摘要
+    const summaryContainer = document.getElementById('speaker-summary');
+    if (summaryContainer) summaryContainer.classList.add('hidden');
+
+    if (allUtterances.length > 0) {
+        renderUtterances(allUtterances, false);
+    } else {
+        loadUtterances();
+    }
+}
+
+function scrollToTime(seconds) {
+    // 找到最接近該時間的 utterance 並捲動到該位置
+    const items = document.querySelectorAll('.utterance-item');
+    let closest = null;
+    let minDiff = Infinity;
+    items.forEach(el => {
+        const t = parseFloat(el.dataset.time || 0);
+        const diff = Math.abs(t - seconds);
+        if (diff < minDiff) { minDiff = diff; closest = el; }
+    });
+    if (closest) {
+        closest.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        closest.classList.add('bg-yellow-50');
+        setTimeout(() => closest.classList.remove('bg-yellow-50'), 2000);
+    }
+}
+
+async function renameSpeaker(speakerId, currentName) {
+    const newName = prompt('輸入說話者名稱：', currentName);
+    if (!newName || newName === currentName) return;
+
+    const resp = await fetch(`/api/meetings/${meetingId}/speakers/${speakerId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({display_name: newName}),
+    });
+
+    if (resp.ok) {
+        // 更新 UI 中的名稱
+        document.querySelectorAll(`.speaker-name[data-speaker-id="${speakerId}"]`).forEach(el => {
+            el.textContent = newName;
+        });
+        // 重新載入 utterances 以反映新名稱
+        allUtterances = [];
+        loadUtterances();
+    }
+}
+
+function switchToReadMode() {
+    document.getElementById('transcript-read')?.classList.remove('hidden');
+    document.getElementById('transcript-edit')?.classList.add('hidden');
+    document.getElementById('read-mode-btn')?.classList.replace('bg-gray-100', 'bg-indigo-100');
+    document.getElementById('read-mode-btn')?.classList.replace('text-gray-600', 'text-indigo-700');
+    document.getElementById('edit-mode-btn')?.classList.replace('bg-indigo-100', 'bg-gray-100');
+    document.getElementById('edit-mode-btn')?.classList.replace('text-indigo-700', 'text-gray-600');
+}
+
+function switchToEditMode() {
+    document.getElementById('transcript-read')?.classList.add('hidden');
+    document.getElementById('transcript-edit')?.classList.remove('hidden');
+    document.getElementById('edit-mode-btn')?.classList.replace('bg-gray-100', 'bg-indigo-100');
+    document.getElementById('edit-mode-btn')?.classList.replace('text-gray-600', 'text-indigo-700');
+    document.getElementById('read-mode-btn')?.classList.replace('bg-indigo-100', 'bg-gray-100');
+    document.getElementById('read-mode-btn')?.classList.replace('text-indigo-700', 'text-gray-600');
+}
+
+// 頁面載入時載入 utterances（若有 speakers）
+{% if speakers %}
+document.addEventListener('DOMContentLoaded', () => loadUtterances());
+{% endif %}
 
 async function generateSummary() {
     const btn = document.getElementById('summarize-btn');

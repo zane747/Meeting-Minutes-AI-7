@@ -28,5 +28,26 @@ async def get_db() -> AsyncSession:
 
 async def init_db() -> None:
     """初始化資料庫，建立所有資料表。"""
+    # 確保所有 model 已載入，否則 Base.metadata 為空
+    import app.models.database_models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # 自動遷移：為既有 meetings 表補上新欄位
+        def _migrate(sync_conn):
+            from sqlalchemy import inspect, text
+
+            inspector = inspect(sync_conn)
+            if "meetings" in inspector.get_table_names():
+                columns = {c["name"] for c in inspector.get_columns("meetings")}
+                if "progress" not in columns:
+                    sync_conn.execute(
+                        text("ALTER TABLE meetings ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
+                    )
+                if "progress_stage" not in columns:
+                    sync_conn.execute(
+                        text("ALTER TABLE meetings ADD COLUMN progress_stage VARCHAR(100)")
+                    )
+
+        await conn.run_sync(_migrate)

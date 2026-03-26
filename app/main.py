@@ -20,6 +20,11 @@ async def lifespan(app: FastAPI):
     啟動時：初始化資料庫、建立 uploads 目錄、檢查 Provider 可用性。
     """
     # --- Startup ---
+    # GPU 環境偵測
+    from app.services.device_manager import DeviceManager
+
+    DeviceManager.initialize()
+
     await init_db()
     logger.info("資料庫初始化完成")
 
@@ -61,7 +66,8 @@ app.mount(
 )
 
 # 註冊路由
-from app.api.routes import meetings, pages
+from app.api.routes import meetings, pages, system
 
 app.include_router(meetings.router)
 app.include_router(pages.router)
+app.include_router(system.router)

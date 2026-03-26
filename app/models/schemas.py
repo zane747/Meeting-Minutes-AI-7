@@ -89,6 +89,8 @@ class MeetingStatusResponse(BaseModel):
     status: str
     provider: str | None
     error_message: str | None
+    progress: int = 0
+    progress_stage: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -105,6 +107,87 @@ class MeetingListItem(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# === Speaker Schemas ===
+
+
+class SpeakerResponse(BaseModel):
+    """說話者回應模型。"""
+
+    id: str
+    meeting_id: str
+    label: str
+    display_name: str | None
+    color: str | None
+    key_points: str | None = None
+    stance: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class SpeakerUpdateRequest(BaseModel):
+    """更新說話者名稱/顏色的請求模型。"""
+
+    display_name: str | None = None
+    color: str | None = None
+
+
+# === Utterance Schemas ===
+
+
+class UtteranceResponse(BaseModel):
+    """發言段落回應模型。"""
+
+    id: str
+    meeting_id: str
+    speaker_id: str | None
+    speaker_label: str | None = None
+    speaker_display_name: str | None = None
+    speaker_color: str | None = None
+    start_time: float
+    end_time: float
+    text: str
+    intent_tag: str | None
+    order_index: int
+
+    model_config = {"from_attributes": True}
+
+
+# === Topic Schemas ===
+
+
+class TopicResponse(BaseModel):
+    """主題段落回應模型。"""
+
+    id: str
+    meeting_id: str
+    title: str
+    start_time: float | None
+    end_time: float | None
+    order_index: int
+    speakers_involved: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+# === System Status Schemas ===
+
+
+class SystemStatusResponse(BaseModel):
+    """系統運算資源狀態回應模型。"""
+
+    device: str
+    gpu_available: bool
+    gpu_name: str | None = None
+    gpu_vram_total_gb: float | None = None
+    gpu_vram_used_gb: float | None = None
+    whisper_model: str
+    whisper_active_model: str | None = None
+    force_cpu_fallback: bool
+    last_fallback_reason: str | None = None
+    ollama_enabled: bool
+    diarization_enabled: bool
 
 
 # === 通用回應 ===

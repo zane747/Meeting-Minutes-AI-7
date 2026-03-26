@@ -10,7 +10,15 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_audio_processor
-from app.models.database_models import ActionItem, AnnotationFile, Meeting, MeetingStatus
+from app.models.database_models import (
+    ActionItem,
+    AnnotationFile,
+    Meeting,
+    MeetingStatus,
+    Speaker,
+    Topic,
+    Utterance,
+)
 from app.models.schemas import (
     ActionItemCreate,
     ActionItemResponse,
@@ -20,15 +28,36 @@ from app.models.schemas import (
     MeetingStatusResponse,
     MeetingUpdate,
     MessageResponse,
+    SpeakerResponse,
+    SpeakerUpdateRequest,
+    TopicResponse,
     UploadResponse,
+    UtteranceResponse,
 )
+from app.config import settings
 from app.services import annotation_service, audio_service, ollama_service
+from app.services.device_manager import DeviceManager
 from app.services.meeting_processor import process_meeting
 from app.services.providers.base import ProcessingContext
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+
+
+def _parse_time_to_seconds(time_str: str) -> float | None:
+    """將 MM:SS 或 HH:MM:SS 格式轉為秒數。"""
+    if not time_str:
+        return None
+    try:
+        parts = time_str.strip().split(":")
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except (ValueError, IndexError):
+        pass
+    return None
 
 
 @router.post("/upload-and-process", response_model=UploadResponse)
@@ -42,6 +71,8 @@ async def upload_and_process(
     mode: str | None = Query(None),
     skip_transcription: bool = False,
     duration: float = 0.0,
+    enable_diarization: bool = False,
+    num_speakers: int | None = None,
 ) -> UploadResponse:
     """上傳音檔（+ TextGrid/RTTM 選填）+ 自動觸發 AI 處理。
 
@@ -97,6 +128,13 @@ async def upload_and_process(
     context = await _process_annotations(
         meeting.id, textgrid, rttm, skip_transcription, db
     )
+
+    # 注入 diarization 參數
+    if enable_diarization:
+        if context is None:
+            context = ProcessingContext()
+        context.diarization_enabled = True
+        context.num_speakers = num_speakers if num_speakers and num_speakers > 0 else None
 
     # 送入背景任務
     background_tasks.add_task(process_meeting, meeting.id, processor, context)
@@ -213,6 +251,8 @@ async def retry_processing(
     meeting.status = MeetingStatus.PROCESSING
     meeting.provider = effective_mode
     meeting.error_message = None
+    meeting.progress = 0
+    meeting.progress_stage = None
     await db.commit()
 
     background_tasks.add_task(process_meeting, meeting.id, processor)
@@ -237,39 +277,87 @@ async def summarize_with_ollama(
     if not await ollama_service.is_available():
         raise HTTPException(status_code=503, detail="Ollama 服務不可用，請確認已啟動")
 
-    result = await db.execute(
-        select(Meeting)
-        .options(selectinload(Meeting.action_items))
-        .where(Meeting.id == meeting_id)
-    )
-    meeting = result.scalar_one_or_none()
+    meeting = await db.get(Meeting, meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
     if not meeting.transcript:
         raise HTTPException(status_code=400, detail="此會議沒有逐字稿，無法生成摘要")
 
-    summary_result = await ollama_service.generate_summary(meeting.transcript)
-    if not summary_result:
-        raise HTTPException(status_code=500, detail="Ollama 摘要生成失敗，請稍後重試")
+    # 並行防護：避免同一會議被重複生成摘要
+    if meeting.progress_stage == "摘要重新生成中...":
+        raise HTTPException(status_code=409, detail="此會議正在重新生成摘要，請稍後")
 
-    meeting.summary = summary_result.get("summary", "")
-
-    if not meeting.title and summary_result.get("suggested_title"):
-        meeting.title = summary_result["suggested_title"]
-
-    # 新增 Action Items
-    for item_data in summary_result.get("action_items", []):
-        action = ActionItem(
-            meeting_id=meeting_id,
-            description=item_data.get("description", ""),
-            assignee=item_data.get("assignee"),
-            due_date=item_data.get("due_date"),
-        )
-        db.add(action)
-
+    meeting.progress_stage = "摘要重新生成中..."
     await db.commit()
-    return MessageResponse(detail="摘要生成完成")
+
+    try:
+        # 先生成新摘要（舊資料尚未刪除，失敗時不影響既有資料）
+        gpu_mode = settings.OLLAMA_GPU.lower()
+        if gpu_mode in ("auto", "true"):
+            async with DeviceManager.get_gpu_lock():
+                summary_result = await ollama_service.generate_summary(meeting.transcript)
+        else:
+            summary_result = await ollama_service.generate_summary(meeting.transcript)
+
+        if not summary_result:
+            meeting.progress_stage = None
+            await db.commit()
+            raise HTTPException(status_code=500, detail="Ollama 摘要生成失敗，請稍後重試")
+
+        # 成功後才刪除舊資料（避免失敗時丟失既有摘要）
+        result = await db.execute(
+            select(Meeting)
+            .options(selectinload(Meeting.action_items), selectinload(Meeting.topics))
+            .where(Meeting.id == meeting_id)
+        )
+        meeting = result.scalar_one()
+
+        for item in list(meeting.action_items):
+            await db.delete(item)
+        for topic in list(meeting.topics):
+            await db.delete(topic)
+
+        # 寫入新結果
+        meeting.summary = summary_result.get("summary", "")
+
+        if summary_result.get("suggested_title"):
+            meeting.title = summary_result["suggested_title"]
+
+        for item_data in summary_result.get("action_items", []):
+            action = ActionItem(
+                meeting_id=meeting_id,
+                description=item_data.get("description", ""),
+                assignee=item_data.get("assignee"),
+                due_date=item_data.get("due_date"),
+            )
+            db.add(action)
+
+        # 儲存 Semantic Analysis（Topics）
+        sa = summary_result.get("semantic_analysis")
+        if sa:
+            for idx, topic_data in enumerate(sa.get("topics", [])):
+                start_time = _parse_time_to_seconds(topic_data.get("start_time", ""))
+                end_time = _parse_time_to_seconds(topic_data.get("end_time", ""))
+                topic = Topic(
+                    meeting_id=meeting_id,
+                    title=topic_data.get("title", ""),
+                    start_time=start_time,
+                    end_time=end_time,
+                    order_index=idx,
+                )
+                db.add(topic)
+
+        meeting.progress_stage = None
+        await db.commit()
+        return MessageResponse(detail="摘要生成完成")
+
+    except HTTPException:
+        raise
+    except Exception:
+        meeting.progress_stage = None
+        await db.commit()
+        raise
 
 
 @router.get("/{meeting_id}/status", response_model=MeetingStatusResponse)
@@ -423,6 +511,107 @@ async def delete_meeting_audio(
     meeting.file_path = None
     await db.commit()
     return MessageResponse(detail="音檔已刪除")
+
+
+# === Speaker & Utterance APIs ===
+
+
+@router.get("/{meeting_id}/speakers", response_model=list[SpeakerResponse])
+async def get_speakers(
+    meeting_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[Speaker]:
+    """取得該會議所有說話者。"""
+    meeting = await db.get(Meeting, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    result = await db.execute(
+        select(Speaker).where(Speaker.meeting_id == meeting_id)
+    )
+    return list(result.scalars().all())
+
+
+@router.put("/{meeting_id}/speakers/{speaker_id}", response_model=SpeakerResponse)
+async def update_speaker(
+    meeting_id: str,
+    speaker_id: str,
+    data: SpeakerUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Speaker:
+    """更新說話者名稱或顏色。"""
+    speaker = await db.get(Speaker, speaker_id)
+    if not speaker or speaker.meeting_id != meeting_id:
+        raise HTTPException(status_code=404, detail="說話者不存在")
+
+    if data.display_name is not None:
+        speaker.display_name = data.display_name
+    if data.color is not None:
+        speaker.color = data.color
+
+    await db.commit()
+    await db.refresh(speaker)
+    return speaker
+
+
+@router.get("/{meeting_id}/utterances", response_model=list[UtteranceResponse])
+async def get_utterances(
+    meeting_id: str,
+    db: AsyncSession = Depends(get_db),
+    speaker_id: str | None = Query(None),
+) -> list[dict]:
+    """取得發言段落（可按說話者篩選）。"""
+    meeting = await db.get(Meeting, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    query = (
+        select(Utterance, Speaker)
+        .outerjoin(Speaker, Utterance.speaker_id == Speaker.id)
+        .where(Utterance.meeting_id == meeting_id)
+        .order_by(Utterance.order_index)
+    )
+
+    if speaker_id:
+        query = query.where(Utterance.speaker_id == speaker_id)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        {
+            "id": utt.id,
+            "meeting_id": utt.meeting_id,
+            "speaker_id": utt.speaker_id,
+            "speaker_label": spk.label if spk else None,
+            "speaker_display_name": spk.display_name if spk else None,
+            "speaker_color": spk.color if spk else None,
+            "start_time": utt.start_time,
+            "end_time": utt.end_time,
+            "text": utt.text,
+            "intent_tag": utt.intent_tag,
+            "order_index": utt.order_index,
+        }
+        for utt, spk in rows
+    ]
+
+
+@router.get("/{meeting_id}/topics", response_model=list[TopicResponse])
+async def get_topics(
+    meeting_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[Topic]:
+    """取得該會議的主題段落列表。"""
+    meeting = await db.get(Meeting, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    result = await db.execute(
+        select(Topic)
+        .where(Topic.meeting_id == meeting_id)
+        .order_by(Topic.order_index)
+    )
+    return list(result.scalars().all())
 
 
 # === Action Items CRUD ===

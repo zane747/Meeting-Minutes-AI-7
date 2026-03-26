@@ -38,6 +38,8 @@ class Meeting(Base):
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
@@ -49,6 +51,15 @@ class Meeting(Base):
         back_populates="meeting", cascade="all, delete-orphan"
     )
     annotation_files: Mapped[list["AnnotationFile"]] = relationship(
+        back_populates="meeting", cascade="all, delete-orphan"
+    )
+    speakers: Mapped[list["Speaker"]] = relationship(
+        back_populates="meeting", cascade="all, delete-orphan"
+    )
+    utterances: Mapped[list["Utterance"]] = relationship(
+        back_populates="meeting", cascade="all, delete-orphan"
+    )
+    topics: Mapped[list["Topic"]] = relationship(
         back_populates="meeting", cascade="all, delete-orphan"
     )
 
@@ -89,3 +100,70 @@ class AnnotationFile(Base):
     parsed_data: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="annotation_files")
+
+
+class Speaker(Base):
+    """說話者資料模型。"""
+
+    __tablename__ = "speakers"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(50), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    key_points: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stance: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    meeting: Mapped["Meeting"] = relationship(back_populates="speakers")
+    utterances: Mapped[list["Utterance"]] = relationship(
+        back_populates="speaker", cascade="all, delete-orphan"
+    )
+
+
+class Utterance(Base):
+    """發言段落資料模型。"""
+
+    __tablename__ = "utterances"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False
+    )
+    speaker_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("speakers.id", ondelete="SET NULL"), nullable=True
+    )
+    start_time: Mapped[float] = mapped_column(Float, nullable=False)
+    end_time: Mapped[float] = mapped_column(Float, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    intent_tag: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    meeting: Mapped["Meeting"] = relationship(back_populates="utterances")
+    speaker: Mapped["Speaker | None"] = relationship(back_populates="utterances")
+
+
+class Topic(Base):
+    """主題段落資料模型。"""
+
+    __tablename__ = "topics"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    meeting_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    start_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    speakers_involved: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    meeting: Mapped["Meeting"] = relationship(back_populates="topics")
