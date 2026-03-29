@@ -9,13 +9,36 @@
     {% block head %}{% endblock %}
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <!-- Navigation -->
+    <!--
+    Navigation（導覽列）
+    【新手導讀】導覽列根據登入狀態顯示不同內容：
+    - 已登入：顯示上傳、歷史紀錄連結 + 使用者名稱 + 登出按鈕
+    - 未登入：只顯示登入連結
+    current_user 變數由路由函式透過模板 context 傳入。
+    -->
     <nav class="bg-white shadow-sm border-b">
         <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
             <a href="/" class="text-xl font-bold text-gray-800">Meeting Minutes AI</a>
-            <div class="flex gap-4">
+            <div class="flex items-center gap-4">
+                {% if current_user %}
+                <!-- 已登入：顯示功能連結 + 使用者資訊 -->
                 <a href="/" class="text-gray-600 hover:text-gray-900">上傳</a>
                 <a href="/meetings" class="text-gray-600 hover:text-gray-900">歷史紀錄</a>
+                <span class="text-gray-500">|</span>
+                <span class="text-sm text-gray-600">{{ current_user.username }}</span>
+                <!--
+                登出按鈕用 <form> 包裹，因為登出必須用 POST 方法。
+                為什麼不用 <a> 連結？因為 GET 請求的連結容易被 CSRF 攻擊利用。
+                -->
+                <form action="/logout" method="post" class="inline">
+                    <button type="submit" class="text-sm text-red-500 hover:text-red-700">
+                        登出
+                    </button>
+                </form>
+                {% else %}
+                <!-- 未登入：顯示登入連結 -->
+                <a href="/login" class="text-gray-600 hover:text-gray-900">登入</a>
+                {% endif %}
             </div>
         </div>
     </nav>

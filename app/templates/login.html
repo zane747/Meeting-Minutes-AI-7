@@ -1,0 +1,90 @@
+<!--
+【新手導讀】這是「登入頁面」的 Jinja2 模板。
+
+特別的地方：
+1. 支援 expired 參數 → 顯示「登入已過期，請重新登入」
+2. 支援 next_url 隱藏欄位 → 登入後導回原本想去的頁面
+3. 錯誤訊息統一顯示「帳號或密碼錯誤」（不區分帳號或密碼哪個錯，防止帳號枚舉攻擊）
+-->
+{% extends "base.html" %}
+
+{% block title %}登入 - Meeting Minutes AI{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto mt-16">
+    <!-- 標題區塊 -->
+    <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">登入</h1>
+        <p class="text-gray-500 mt-2">歡迎回來！請輸入帳號密碼</p>
+    </div>
+
+    <!-- 錯誤訊息或過期提示 -->
+    {% if error %}
+    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <!--
+    登入表單
+    注意 hidden input "next"：這是為了實現「登入後導回原頁面」的功能。
+    例如：使用者未登入直接訪問 /meetings/abc
+    → 被導向 /login?next=/meetings/abc
+    → 登入頁面把 next=/meetings/abc 放進隱藏欄位
+    → 使用者登入成功後，伺服器讀取 next 欄位，302 導向 /meetings/abc
+    -->
+    <form action="/login" method="post" class="bg-white shadow-md rounded-lg px-8 py-8 space-y-6">
+
+        <!--
+        隱藏欄位：登入後要導回的頁面路徑
+        使用者看不到這個欄位，但表單送出時會一起送出
+        -->
+        <input type="hidden" name="next" value="{{ next_url or '' }}">
+
+        <!-- 帳號欄位 -->
+        <div>
+            <label for="username" class="block text-sm font-medium text-gray-700 mb-1">
+                帳號
+            </label>
+            <input
+                type="text"
+                id="username"
+                name="username"
+                placeholder="請輸入帳號"
+                required
+                autofocus
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+        </div>
+
+        <!-- 密碼欄位 -->
+        <div>
+            <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+                密碼
+            </label>
+            <input
+                type="password"
+                id="password"
+                name="password"
+                placeholder="請輸入密碼"
+                required
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+        </div>
+
+        <!-- 送出按鈕 -->
+        <button
+            type="submit"
+            class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+        >
+            登入
+        </button>
+    </form>
+
+    <!-- 前往註冊的連結 -->
+    <p class="text-center text-gray-500 mt-6">
+        還沒有帳號？
+        <a href="/register" class="text-blue-600 hover:underline">前往註冊</a>
+    </p>
+</div>
+{% endblock %}

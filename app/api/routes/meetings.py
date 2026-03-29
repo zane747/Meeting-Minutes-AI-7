@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_audio_processor
+from app.dependencies import get_audio_processor, get_current_user
 from app.models.database_models import ActionItem, AnnotationFile, Meeting, MeetingStatus
 from app.models.schemas import (
     ActionItemCreate,
@@ -36,6 +36,7 @@ async def upload_and_process(
     file: UploadFile,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
     textgrid: UploadFile | None = None,
     rttm: UploadFile | None = None,
     title: str | None = None,
@@ -184,6 +185,7 @@ async def retry_processing(
     meeting_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
     mode: str | None = Query(None),
 ) -> UploadResponse:
     """失敗後重新觸發處理（允許切換 Provider）。
@@ -224,6 +226,7 @@ async def retry_processing(
 async def summarize_with_ollama(
     meeting_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """對已有逐字稿的會議，用 Ollama 生成摘要與 Action Items。
 
@@ -276,6 +279,7 @@ async def summarize_with_ollama(
 async def get_meeting_status(
     meeting_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> Meeting:
     """查詢處理狀態（供 HTMX polling）。
 
@@ -295,6 +299,7 @@ async def get_meeting_status(
 @router.get("", response_model=list[MeetingListItem])
 async def list_meetings(
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> list[Meeting]:
     """取得會議列表（時間倒序）。
 
@@ -314,6 +319,7 @@ async def list_meetings(
 async def get_meeting(
     meeting_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> Meeting:
     """取得完整會議資料。
 
@@ -340,6 +346,7 @@ async def update_meeting(
     meeting_id: str,
     data: MeetingUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> Meeting:
     """編輯會議（標題、摘要、逐字稿）。
 
@@ -376,6 +383,7 @@ async def update_meeting(
 async def delete_meeting(
     meeting_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """刪除會議紀錄（含音檔）。
 
@@ -402,6 +410,7 @@ async def delete_meeting(
 async def delete_meeting_audio(
     meeting_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """僅刪除音檔（保留文字紀錄）。
 
@@ -433,6 +442,7 @@ async def create_action_item(
     meeting_id: str,
     data: ActionItemCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> ActionItem:
     """新增 Action Item。
 
@@ -466,6 +476,7 @@ async def update_action_item(
     action_id: str,
     data: ActionItemUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> ActionItem:
     """編輯 Action Item。
 
@@ -501,6 +512,7 @@ async def delete_action_item(
     meeting_id: str,
     action_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> MessageResponse:
     """刪除 Action Item。
 

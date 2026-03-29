@@ -17,6 +17,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",  # 忽略 .env 中不在 Settings class 定義的欄位
     )
 
     # === Provider 切換 ===
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b"
     OLLAMA_NUM_CTX: int = 8192
+
+    # === Session（登入狀態管理）===
+    SESSION_SECRET_KEY: str = "change-me-to-a-random-secret-key"
 
     # === 通用 ===
     UPLOAD_DIR: str = "./uploads"
