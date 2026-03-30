@@ -177,14 +177,18 @@ async def login(
 
     # authenticate_user 會去資料庫查帳號、比對密碼雜湊
     # 成功回傳 User 物件，失敗回傳 None
-    user = await auth_service.authenticate_user(db, username, password)
+    user, status = await auth_service.authenticate_user(db, username, password)
 
     if not user:
-        # 為什麼錯誤訊息是「帳號或密碼錯誤」而不是「帳號不存在」或「密碼錯誤」？
-        # 安全考量：如果區分，攻擊者可以大量測試帳號名稱，
-        # 根據回應判斷哪些帳號存在（帳號枚舉攻擊），然後再針對那些帳號暴力破解密碼。
-        # 統一訊息 → 攻擊者無法知道帳號是否存在。
-        context = {"error": "帳號或密碼錯誤"}
+        # 根據狀態顯示不同訊息
+        if status == "deactivated":
+            # 被停用帳號：顯示專屬訊息（不洩漏帳號存在，但告知原因）
+            error_msg = "帳號已被停用，請聯繫管理員"
+        else:
+            # 帳號不存在或密碼錯誤：統一訊息（防止帳號枚舉攻擊）
+            error_msg = "帳號或密碼錯誤"
+
+        context = {"error": error_msg}
         if next:
             context["next_url"] = next
         return templates.TemplateResponse(

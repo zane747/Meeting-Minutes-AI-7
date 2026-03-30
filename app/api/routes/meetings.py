@@ -43,6 +43,7 @@ async def upload_and_process(
     mode: str | None = Query(None),
     skip_transcription: bool = False,
     duration: float = 0.0,
+    visibility: str = "private",
 ) -> UploadResponse:
     """上傳音檔（+ TextGrid/RTTM 選填）+ 自動觸發 AI 處理。
 
@@ -80,6 +81,10 @@ async def upload_and_process(
     effective_mode = mode or "remote"
     processor = get_audio_processor(effective_mode)
 
+    # 驗證 visibility 值
+    if visibility not in ("public", "private", "same_level"):
+        visibility = "private"
+
     # 建立 Meeting 紀錄
     meeting = Meeting(
         title=title,
@@ -89,6 +94,8 @@ async def upload_and_process(
         duration=duration,
         status=MeetingStatus.PROCESSING,
         provider=effective_mode,
+        created_by=current_user["user_id"],
+        visibility=visibility,
     )
     db.add(meeting)
     await db.commit()
@@ -531,3 +538,38 @@ async def delete_action_item(
     await db.delete(action)
     await db.commit()
     return MessageResponse(detail="Action Item 已刪除")
+
+
+# === 會議可見性修改 ===
+
+
+from pydantic import BaseModel as _BaseModel
+
+
+class VisibilityUpdate(_BaseModel):
+    """可見性修改請求。"""
+    visibility: str
+
+
+@router.put("/{meeting_id}/visibility")
+async def update_visibility(
+    meeting_id: str,
+    data: VisibilityUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """修改會議紀錄的可見性。只有上傳者本人或等級 1 可以修改。"""
+    if data.visibility not in ("public", "private", "same_level"):
+        raise HTTPException(status_code=400, detail="可見性值無效")
+
+    meeting = await db.get(Meeting, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    # 權限：上傳者本人 或 等級 1
+    if meeting.created_by != current_user["user_id"] and current_user.get("role", 3) != 1:
+        raise HTTPException(status_code=403, detail="權限不足")
+
+    meeting.visibility = data.visibility
+    await db.commit()
+    return {"detail": f"可見性已變更為 {data.visibility}"}

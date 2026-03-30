@@ -47,6 +47,9 @@ class User(Base):
     )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    role: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3
+    )  # 角色等級：1=超級管理員, 2=管理員, 3=一般使用者
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
@@ -83,6 +86,12 @@ class Meeting(Base):
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )  # 上傳者 ID（既有資料為 null）
+    visibility: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="public"
+    )  # 可見性：public / private / same_level（DB 預設 public 給既有資料，新上傳在應用層設 private）
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
@@ -90,6 +99,7 @@ class Meeting(Base):
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
     action_items: Mapped[list["ActionItem"]] = relationship(
         back_populates="meeting", cascade="all, delete-orphan"
     )

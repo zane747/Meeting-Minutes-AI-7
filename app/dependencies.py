@@ -17,8 +17,10 @@ FastAPI 看到 Depends(get_current_user)，就會：
 刷過了才能進去（執行路由函式）。
 """
 
+from typing import Callable
+
 from fastapi import HTTPException, Request
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -92,12 +94,14 @@ async def get_current_user(request: Request) -> dict:
             if not user or not user.is_active:
                 # 帳號已被停用或刪除 → 清除 session，當作未登入處理
                 request.session.clear()
-                # 不直接 return，讓下面的「未登入邏輯」處理導向
                 user_id = None
                 username = None
+            else:
+                # 帳號有效 → 一次讀取 role（不用再查一次 DB）
+                role = user.role
 
     if user_id and username:
-        return {"user_id": user_id, "username": username}
+        return {"user_id": user_id, "username": username, "role": role}
 
     # 未登入的處理邏輯：根據路由類型決定回應方式
     request_path = request.url.path
@@ -117,6 +121,40 @@ async def get_current_user(request: Request) -> dict:
             detail="需要登入",
             headers={"Location": redirect_url},
         )
+
+
+def require_role(max_level: int) -> Callable:
+    """依賴函式工廠：檢查使用者角色等級是否足夠。
+
+    用法：Depends(require_role(2)) → 只有等級 1 和 2 可以通過。
+    數字越小等級越高，所以 role <= max_level 就是「等級夠高」。
+
+    Args:
+        max_level: 允許的最高角色數字（1=超級管理員, 2=管理員, 3=一般使用者）。
+
+    Returns:
+        一個依賴函式，回傳 current_user dict。
+    """
+
+    async def _check_role(request: Request) -> dict:
+        current_user = await get_current_user(request)
+        user_role = current_user.get("role", 3)
+
+        if user_role > max_level:
+            request_path = request.url.path
+            if request_path.startswith("/api/"):
+                raise HTTPException(
+                    status_code=HTTP_403_FORBIDDEN,
+                    detail="權限不足",
+                )
+            else:
+                raise HTTPException(
+                    status_code=HTTP_403_FORBIDDEN,
+                    detail="權限不足",
+                )
+        return current_user
+
+    return _check_role
 
 
 async def get_current_user_optional(request: Request) -> dict | None:

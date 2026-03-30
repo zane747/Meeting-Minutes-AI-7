@@ -81,6 +81,16 @@
         <!-- Hidden duration field -->
         <input type="hidden" id="duration" name="duration" value="0">
 
+        <!-- 可見性設定 -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">會議可見性</label>
+            <select name="visibility" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                <option value="private" selected>僅自己可見</option>
+                <option value="same_level">同等級可見</option>
+                <option value="public">公開（所有人可見）</option>
+            </select>
+        </div>
+
         <!-- 送出按鈕 -->
         <button type="submit" id="submit-btn"
                 class="w-full py-3 px-4 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition">

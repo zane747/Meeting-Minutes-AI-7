@@ -90,12 +90,20 @@ async def create_user(
     Returns:
         新建立的 User 物件（包含自動生成的 id）。
     """
+    # 判斷是否為第一個帳號 → 自動成為超級管理員（等級 1）
+    user_count = await get_active_user_count(db)
+    # get_active_user_count 只算啟用帳號，但第一個註冊時資料庫完全是空的
+    # 所以這裡用總數判斷更準確
+    total = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    role = 1 if total == 0 else 3
+
     hashed = hash_password(password)
-    user = User(username=username, password_hash=hashed)
+    user = User(username=username, password_hash=hashed, role=role)
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    logger.info(f"新使用者註冊：{username}")
+    role_name = {1: "超級管理員", 2: "管理員", 3: "一般使用者"}.get(role, "未知")
+    logger.info(f"新使用者註冊：{username}（{role_name}）")
     return user
 
 
@@ -143,12 +151,12 @@ async def authenticate_user(
     """
     user = await get_user_by_username(db, username)
     if not user:
-        return None
+        return None, "not_found"
     if not user.is_active:
-        return None
+        return None, "deactivated"
     if not verify_password(password, user.password_hash):
-        return None
-    return user
+        return None, "wrong_password"
+    return user, "success"
 
 
 # === 帳號管理功能（007-account-management 新增）===
@@ -224,17 +232,21 @@ async def toggle_user_active(
     db: AsyncSession,
     user_id: str,
     operator_id: str,
+    operator_role: int = 1,
 ) -> tuple[bool, str]:
     """切換帳號的啟用/停用狀態。
 
     保護規則：
     - 不能操作自己的帳號
     - 停用後至少要有一個啟用帳號
+    - 等級 2 只能操作等級 3（不能動等級 1 或其他等級 2）
+    - 不能操作等級 1 帳號
 
     Args:
         db: 資料庫 Session。
         user_id: 要操作的帳號 ID。
-        operator_id: 執行操作的使用者 ID（用來檢查是不是自己）。
+        operator_id: 執行操作的使用者 ID。
+        operator_role: 操作者的角色等級。
 
     Returns:
         (成功與否, 訊息) 的 tuple。
@@ -245,6 +257,12 @@ async def toggle_user_active(
     user = await db.get(User, user_id)
     if not user:
         return False, "帳號不存在"
+
+    # 角色權限檢查：不能操作等級 1，等級 2 只能操作等級 3
+    if user.role == 1:
+        return False, "無法操作超級管理員帳號"
+    if operator_role == 2 and user.role <= 2:
+        return False, "權限不足，只能操作一般使用者"
 
     # 如果要停用（目前是啟用），檢查是不是最後一個啟用帳號
     if user.is_active:
@@ -265,17 +283,21 @@ async def delete_user(
     db: AsyncSession,
     user_id: str,
     operator_id: str,
+    operator_role: int = 1,
 ) -> tuple[bool, str]:
     """刪除帳號。
 
     保護規則：
     - 不能刪除自己
     - 系統至少保留一個帳號
+    - 不能刪除等級 1 帳號
+    - 等級 2 只能刪除等級 3
 
     Args:
         db: 資料庫 Session。
         user_id: 要刪除的帳號 ID。
         operator_id: 執行操作的使用者 ID。
+        operator_role: 操作者的角色等級。
 
     Returns:
         (成功與否, 訊息) 的 tuple。
@@ -286,6 +308,12 @@ async def delete_user(
     user = await db.get(User, user_id)
     if not user:
         return False, "帳號不存在"
+
+    # 角色權限檢查
+    if user.role == 1:
+        return False, "無法刪除超級管理員帳號"
+    if operator_role == 2 and user.role <= 2:
+        return False, "權限不足，只能刪除一般使用者"
 
     # 如果這是啟用帳號，確保刪除後至少還有一個啟用帳號
     if user.is_active:
@@ -298,3 +326,67 @@ async def delete_user(
     await db.commit()
     logger.info(f"帳號已刪除：{username}")
     return True, "帳號已刪除"
+
+
+# === 權限管理功能（008-role-permission 新增）===
+
+
+async def get_admin_count(db: AsyncSession) -> int:
+    """取得等級 1（超級管理員）帳號數量。
+
+    Args:
+        db: 資料庫 Session。
+
+    Returns:
+        等級 1 帳號數量。
+    """
+    result = await db.execute(
+        select(func.count()).select_from(User).where(User.role == 1)
+    )
+    return result.scalar_one()
+
+
+async def change_role(
+    db: AsyncSession,
+    user_id: str,
+    new_role: int,
+    operator_id: str,
+) -> tuple[bool, str]:
+    """變更帳號的角色等級。
+
+    保護規則：
+    - 只有等級 1 可以呼叫（路由層用 require_role(1) 擋）
+    - 只能操作等級 2 和 3 的帳號（不能動其他等級 1）
+    - 不能操作自己
+    - 如果是降級等級 1（理論上不會發生），確保至少一個等級 1
+
+    Args:
+        db: 資料庫 Session。
+        user_id: 要變更的帳號 ID。
+        new_role: 目標角色等級（2 或 3）。
+        operator_id: 操作者 ID。
+
+    Returns:
+        (成功與否, 訊息) 的 tuple。
+    """
+    if user_id == operator_id:
+        return False, "無法修改自己的角色"
+
+    if new_role not in (2, 3):
+        return False, "角色等級只能設為 2 或 3"
+
+    user = await db.get(User, user_id)
+    if not user:
+        return False, "帳號不存在"
+
+    # 不能操作等級 1 帳號
+    if user.role == 1:
+        return False, "無法修改超級管理員的角色"
+
+    old_role = user.role
+    user.role = new_role
+    await db.commit()
+
+    role_names = {1: "超級管理員", 2: "管理員", 3: "一般使用者"}
+    logger.info(f"帳號 {user.username} 角色變更：{role_names[old_role]} → {role_names[new_role]}")
+    return True, f"角色已變更為{role_names[new_role]}"

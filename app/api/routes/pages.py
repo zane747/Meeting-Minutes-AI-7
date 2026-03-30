@@ -20,7 +20,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.database_models import Meeting
+from app.models.database_models import Meeting, User
 
 router = APIRouter(tags=["pages"])
 
@@ -66,10 +66,43 @@ async def history(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> HTMLResponse:
-    """歷史紀錄頁（依時間倒序）。需要登入。"""
-    result = await db.execute(
-        select(Meeting).order_by(Meeting.created_at.desc())
-    )
+    """歷史紀錄頁（依時間倒序）。根據角色和可見性過濾。"""
+    from sqlalchemy import or_
+
+    user_role = current_user.get("role", 3)
+    user_id = current_user["user_id"]
+
+    query = select(Meeting)
+
+    if user_role == 1:
+        # 等級 1：看全部
+        pass
+    elif user_role == 2:
+        # 等級 2：自己的 + 公開的 + 等級 3 的所有（上級往下看）+ 同等級同級可見
+        # 需要 join User 取得建立者的角色
+        creator_alias = User
+        query = query.outerjoin(creator_alias, Meeting.created_by == creator_alias.id).where(
+            or_(
+                Meeting.created_by == user_id,  # 自己的
+                Meeting.visibility == "public",  # 公開的
+                Meeting.created_by == None,  # 既有資料（無上傳者）
+                creator_alias.role == 3,  # 等級 3 的所有會議（上級往下看）
+                (Meeting.visibility == "same_level") & (creator_alias.role == 2),  # 同級同等級可見
+            )
+        )
+    else:
+        # 等級 3：自己的 + 公開的 + 同等級同級可見
+        creator_alias = User
+        query = query.outerjoin(creator_alias, Meeting.created_by == creator_alias.id).where(
+            or_(
+                Meeting.created_by == user_id,  # 自己的
+                Meeting.visibility == "public",  # 公開的
+                Meeting.created_by == None,  # 既有資料
+                (Meeting.visibility == "same_level") & (creator_alias.role == 3),  # 同級同等級可見
+            )
+        )
+
+    result = await db.execute(query.order_by(Meeting.created_at.desc()))
     meetings = list(result.scalars().all())
 
     return _no_cache_response(templates.TemplateResponse(
