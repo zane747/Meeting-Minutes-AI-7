@@ -29,15 +29,16 @@ async def lifespan(app: FastAPI):
     啟動時：初始化資料庫、建立 uploads 目錄、檢查 Provider 可用性。
     """
     # --- Startup ---
-    await init_db()
+    await init_db() ## 初始化資料庫連線、建立表格等，確保應用程式啟動後能正常使用資料庫
     logger.info("資料庫初始化完成")
 
-    upload_dir = Path(settings.UPLOAD_DIR)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"上傳目錄已確認：{upload_dir}")
+    upload_dir = Path(settings.UPLOAD_DIR) ##創建了一個用於存放上傳文件的目錄路徑對象 確保檔案格式跟大小正確
+    upload_dir.mkdir(parents=True, exist_ok=True)##如果該目錄不存在，則創建它（parents=True 允許創建多層目錄，exist_ok=True 表示如果目錄已存在則不報錯）
+    logger.info(f"上傳目錄已確認：{upload_dir}")##  記錄上傳目錄的路徑，方便調試和確認目錄是否正確創建
+    
 
     # Provider 健康檢查（啟動時 warning）
-    try:
+    try: 
         from app.dependencies import get_audio_processor
 
         processor = get_audio_processor()
@@ -80,18 +81,19 @@ app.add_middleware(
 )
 
 # 靜態資源
-app.mount(
-    "/static",
-    StaticFiles(directory=Path(__file__).parent / "static"),
-    name="static",
+app.mount( ##把 static 目錄掛載到 /static 路徑，讓瀏覽器能訪問 CSS、JS 等靜態檔案
+    "/static", ## URL 路徑前綴，訪問靜態資源時需要加上 /static，例如 /static/style.css
+    StaticFiles(directory=Path(__file__).parent / "static"), #  靜態資源所在的目錄，這裡是 app/static
+    name="static", ## 這個名稱在 FastAPI 中用於內部識別，可以隨意取，但通常會用 "static"
 )
 
 # 註冊路由
 # 【新手導讀】include_router 就是告訴 FastAPI「把這組路由加進來」。
 # 順序很重要：auth 要在 pages 前面，因為 /login、/register 路由
 # 不需要認證，要優先被匹配到。
-from app.api.routes import auth, meetings, pages
+from app.api.routes import accounts, auth, meetings, pages
 
 app.include_router(auth.router)
+app.include_router(accounts.router)
 app.include_router(meetings.router)
 app.include_router(pages.router)

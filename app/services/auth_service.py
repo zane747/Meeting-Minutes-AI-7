@@ -18,7 +18,7 @@
 import logging
 
 import bcrypt
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database_models import User
@@ -149,3 +149,152 @@ async def authenticate_user(
     if not verify_password(password, user.password_hash):
         return None
     return user
+
+
+# === 帳號管理功能（007-account-management 新增）===
+
+
+async def get_all_users(db: AsyncSession) -> list[User]:
+    """取得所有使用者列表（依建立時間倒序）。
+
+    Args:
+        db: 資料庫 Session。
+
+    Returns:
+        使用者列表。
+    """
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    return list(result.scalars().all())
+
+
+async def get_active_user_count(db: AsyncSession) -> int:
+    """取得目前啟用狀態的帳號數量。
+
+    用於保護「至少一個啟用帳號」的規則：
+    停用或刪除前先查這個數字，如果只剩 1 就拒絕操作。
+
+    Args:
+        db: 資料庫 Session。
+
+    Returns:
+        啟用帳號數量。
+    """
+    result = await db.execute(
+        select(func.count()).select_from(User).where(User.is_active == True)
+    )
+    return result.scalar_one()
+
+
+async def change_password(
+    db: AsyncSession,
+    user_id: str,
+    old_password: str,
+    new_password: str,
+) -> tuple[bool, str]:
+    """修改使用者密碼。
+
+    流程：查找使用者 → 驗證舊密碼 → 雜湊新密碼 → 更新資料庫。
+
+    Args:
+        db: 資料庫 Session。
+        user_id: 要修改密碼的使用者 ID。
+        old_password: 使用者輸入的舊密碼。
+        new_password: 使用者輸入的新密碼。
+
+    Returns:
+        (成功與否, 訊息) 的 tuple。
+    """
+    user = await db.get(User, user_id)
+    if not user:
+        return False, "使用者不存在"
+
+    if not verify_password(old_password, user.password_hash):
+        return False, "舊密碼不正確"
+
+    if len(new_password) < 8:
+        return False, "新密碼長度至少 8 個字元"
+
+    user.password_hash = hash_password(new_password)
+    await db.commit()
+    logger.info(f"使用者修改密碼：{user.username}")
+    return True, "密碼修改成功"
+
+
+async def toggle_user_active(
+    db: AsyncSession,
+    user_id: str,
+    operator_id: str,
+) -> tuple[bool, str]:
+    """切換帳號的啟用/停用狀態。
+
+    保護規則：
+    - 不能操作自己的帳號
+    - 停用後至少要有一個啟用帳號
+
+    Args:
+        db: 資料庫 Session。
+        user_id: 要操作的帳號 ID。
+        operator_id: 執行操作的使用者 ID（用來檢查是不是自己）。
+
+    Returns:
+        (成功與否, 訊息) 的 tuple。
+    """
+    if user_id == operator_id:
+        return False, "無法停用自己的帳號"
+
+    user = await db.get(User, user_id)
+    if not user:
+        return False, "帳號不存在"
+
+    # 如果要停用（目前是啟用），檢查是不是最後一個啟用帳號
+    if user.is_active:
+        active_count = await get_active_user_count(db)
+        if active_count <= 1:
+            return False, "系統至少需要一個啟用帳號"
+
+    # 切換狀態
+    user.is_active = not user.is_active
+    await db.commit()
+
+    status = "啟用" if user.is_active else "停用"
+    logger.info(f"帳號 {user.username} 已被{status}")
+    return True, f"帳號已{status}"
+
+
+async def delete_user(
+    db: AsyncSession,
+    user_id: str,
+    operator_id: str,
+) -> tuple[bool, str]:
+    """刪除帳號。
+
+    保護規則：
+    - 不能刪除自己
+    - 系統至少保留一個帳號
+
+    Args:
+        db: 資料庫 Session。
+        user_id: 要刪除的帳號 ID。
+        operator_id: 執行操作的使用者 ID。
+
+    Returns:
+        (成功與否, 訊息) 的 tuple。
+    """
+    if user_id == operator_id:
+        return False, "無法刪除自己的帳號"
+
+    user = await db.get(User, user_id)
+    if not user:
+        return False, "帳號不存在"
+
+    # 如果這是啟用帳號，確保刪除後至少還有一個啟用帳號
+    if user.is_active:
+        active_count = await get_active_user_count(db)
+        if active_count <= 1:
+            return False, "系統至少需要一個啟用帳號"
+
+    username = user.username
+    await db.delete(user)
+    await db.commit()
+    logger.info(f"帳號已刪除：{username}")
+    return True, "帳號已刪除"
