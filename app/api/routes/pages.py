@@ -10,7 +10,7 @@ current_user 參數不只是用來「擋人」，還會被傳入模板的 contex
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -78,25 +78,24 @@ async def history(
         # 等級 1（超級管理員）：看全部（含所有人的 private，用於除錯）
         pass
     elif user_role == 2:
-        # 等級 2（管理員）：自己的全部 + 他人的公開/同級（private 排除）
+        # 等級 2（管理員）：自己的全部 + 公開的 + 同級管理員的同級可見
         creator_alias = User
         query = query.outerjoin(creator_alias, Meeting.created_by == creator_alias.id).where(
             or_(
                 Meeting.created_by == user_id,  # 自己的（含 private）
                 Meeting.visibility == "public",  # 公開的
-                Meeting.created_by == None,  # 既有資料（無上傳者）
+                Meeting.created_by.is_(None),  # 既有資料（無上傳者）
                 (Meeting.visibility == "same_level") & (creator_alias.role == 2),  # 同級管理員的同級可見
-                (Meeting.visibility != "private") & (creator_alias.role == 3),  # 等級 3 的非私人會議
             )
         )
     else:
-        # 等級 3（一般使用者）：自己的全部 + 他人的公開/同級（private 排除）
+        # 等級 3（一般使用者）：自己的全部 + 公開的 + 同級一般使用者的同級可見
         creator_alias = User
         query = query.outerjoin(creator_alias, Meeting.created_by == creator_alias.id).where(
             or_(
                 Meeting.created_by == user_id,  # 自己的（含 private）
                 Meeting.visibility == "public",  # 公開的
-                Meeting.created_by == None,  # 既有資料
+                Meeting.created_by.is_(None),  # 既有資料
                 (Meeting.visibility == "same_level") & (creator_alias.role == 3),  # 同級一般使用者的同級可見
             )
         )
@@ -127,6 +126,7 @@ async def meeting_detail(
         .options(
             selectinload(Meeting.action_items),
             selectinload(Meeting.annotation_files),
+            selectinload(Meeting.creator),
         )
         .where(Meeting.id == meeting_id)
     )
@@ -142,13 +142,24 @@ async def meeting_detail(
     is_owner = meeting.created_by == current_user["user_id"]
     is_superadmin = current_user.get("role", 3) == 1
 
-    # 私人會議：僅持有者與超級管理員可檢視
-    if meeting.visibility == "private" and not is_owner and not is_superadmin:
-        return _no_cache_response(templates.TemplateResponse(
-            request=request,
-            name="meeting.html",
-            context={"meeting": None, "error": "此為私人會議紀錄，無權檢視", "current_user": current_user},
-        ))
+    # 可見性檢查：private 和 same_level 都要擋
+    if not is_owner and not is_superadmin:
+        if meeting.visibility == "private":
+            return _no_cache_response(templates.TemplateResponse(
+                request=request,
+                name="meeting.html",
+                context={"meeting": None, "error": "此為私人會議紀錄，無權檢視", "current_user": current_user},
+            ))
+        if meeting.visibility == "same_level":
+            creator_role = meeting.creator.role if meeting.creator else None
+            if creator_role != current_user.get("role", 3):
+                return _no_cache_response(templates.TemplateResponse(
+                    request=request,
+                    name="meeting.html",
+                    context={"meeting": None, "error": "此會議紀錄僅同等級可檢視", "current_user": current_user},
+                ))
+
+    # 編輯權限：必須先有檢視權限，再看 allow_edit
     can_edit = is_owner or is_superadmin or meeting.allow_edit
 
     return _no_cache_response(templates.TemplateResponse(

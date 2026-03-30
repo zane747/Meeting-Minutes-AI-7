@@ -190,3 +190,10 @@ class UploadResponse(BaseModel):
 
     meeting_id: str
     status: str
+
+
+class VisibilityUpdate(BaseModel):
+    """可見性與編輯權限修改請求。"""
+
+    visibility: str | None = None
+    allow_edit: bool | None = None

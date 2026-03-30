@@ -4,13 +4,13 @@ import json
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_audio_processor, get_current_user
-from app.models.database_models import ActionItem, AnnotationFile, Meeting, MeetingStatus
+from app.models.database_models import ActionItem, AnnotationFile, Meeting, MeetingStatus, User
 from app.models.schemas import (
     ActionItemCreate,
     ActionItemResponse,
@@ -21,6 +21,7 @@ from app.models.schemas import (
     MeetingUpdate,
     MessageResponse,
     UploadResponse,
+    VisibilityUpdate,
 )
 from app.services import annotation_service, audio_service, ollama_service
 from app.services.meeting_processor import process_meeting
@@ -210,6 +211,8 @@ async def retry_processing(
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
+    _check_owner_permission(meeting, current_user)
+
     if meeting.status != MeetingStatus.FAILED:
         raise HTTPException(status_code=400, detail="僅失敗的會議可重試")
 
@@ -256,6 +259,8 @@ async def summarize_with_ollama(
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
+    _check_owner_permission(meeting, current_user)
+
     if not meeting.transcript:
         raise HTTPException(status_code=400, detail="此會議沒有逐字稿，無法生成摘要")
 
@@ -300,7 +305,17 @@ async def get_meeting_status(
     meeting = await db.get(Meeting, meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    _check_view_permission(meeting, current_user, await _get_creator_role(meeting, db))
     return meeting
+
+
+async def _get_creator_role(meeting: Meeting, db: AsyncSession) -> int | None:
+    """取得會議建立者的角色等級。"""
+    if not meeting.created_by:
+        return None
+    creator = await db.get(User, meeting.created_by)
+    return creator.role if creator else None
 
 
 @router.get("", response_model=list[MeetingListItem])
@@ -308,7 +323,7 @@ async def list_meetings(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> list[Meeting]:
-    """取得會議列表（時間倒序）。
+    """取得會議列表（時間倒序，依角色與可見性過濾）。
 
     Args:
         db: 資料庫 Session。
@@ -316,9 +331,34 @@ async def list_meetings(
     Returns:
         會議列表。
     """
-    result = await db.execute(
-        select(Meeting).order_by(Meeting.created_at.desc())
-    )
+    user_role = current_user.get("role", 3)
+    user_id = current_user["user_id"]
+
+    query = select(Meeting)
+
+    if user_role == 1:
+        pass  # 超級管理員看全部
+    elif user_role == 2:
+        query = query.outerjoin(User, Meeting.created_by == User.id).where(
+            or_(
+                Meeting.created_by == user_id,
+                Meeting.visibility == "public",
+                Meeting.created_by.is_(None),
+                (Meeting.visibility == "same_level") & (User.role == 2),
+                (Meeting.visibility != "private") & (User.role == 3),
+            )
+        )
+    else:
+        query = query.outerjoin(User, Meeting.created_by == User.id).where(
+            or_(
+                Meeting.created_by == user_id,
+                Meeting.visibility == "public",
+                Meeting.created_by.is_(None),
+                (Meeting.visibility == "same_level") & (User.role == 3),
+            )
+        )
+
+    result = await db.execute(query.order_by(Meeting.created_at.desc()))
     return list(result.scalars().all())
 
 
@@ -345,6 +385,8 @@ async def get_meeting(
     meeting = result.scalar_one_or_none()
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    _check_view_permission(meeting, current_user, await _get_creator_role(meeting, db))
     return meeting
 
 
@@ -374,6 +416,7 @@ async def update_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
+    _check_view_permission(meeting, current_user, await _get_creator_role(meeting, db))
     _check_edit_permission(meeting, current_user)
 
     if data.title is not None:
@@ -407,6 +450,8 @@ async def delete_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
+    _check_owner_permission(meeting, current_user)
+
     if meeting.file_path:
         audio_service.delete_audio_file(meeting.file_path)
 
@@ -434,6 +479,8 @@ async def delete_meeting_audio(
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
+    _check_owner_permission(meeting, current_user)
+
     if not meeting.file_path:
         raise HTTPException(status_code=400, detail="音檔已刪除")
 
@@ -443,11 +490,45 @@ async def delete_meeting_audio(
     return MessageResponse(detail="音檔已刪除")
 
 
-# === 編輯權限檢查 ===
+# === 權限檢查 ===
+
+
+def _check_view_permission(meeting: Meeting, current_user: dict, creator_role: int | None = None) -> None:
+    """檢查當前使用者是否有檢視權限。
+
+    規則：
+    - 持有者：永遠可看自己的
+    - 超級管理員（role 1）：可看全部
+    - public：所有人可看
+    - same_level：僅同等級可看
+    - private：僅持有者與超級管理員
+    """
+    is_owner = meeting.created_by == current_user["user_id"]
+    is_superadmin = current_user.get("role", 3) == 1
+
+    if is_owner or is_superadmin:
+        return
+
+    if meeting.visibility == "public":
+        return
+
+    if meeting.visibility == "same_level" and creator_role == current_user.get("role", 3):
+        return
+
+    # private 或不符合 same_level 條件
+    raise HTTPException(status_code=403, detail="無權檢視此會議紀錄")
+
+
+def _check_owner_permission(meeting: Meeting, current_user: dict) -> None:
+    """檢查當前使用者是否為持有者或超級管理員（用於刪除、重試等破壞性操作）。"""
+    is_owner = meeting.created_by == current_user["user_id"]
+    is_superadmin = current_user.get("role", 3) == 1
+    if not is_owner and not is_superadmin:
+        raise HTTPException(status_code=403, detail="僅持有者或超級管理員可執行此操作")
 
 
 def _check_edit_permission(meeting: Meeting, current_user: dict) -> None:
-    """檢查當前使用者是否有編輯權限。非持有者需要 allow_edit=True，等級 1 例外。"""
+    """檢查當前使用者是否有編輯權限。需先通過檢視權限，再檢查 allow_edit。"""
     is_owner = meeting.created_by == current_user["user_id"]
     is_superadmin = current_user.get("role", 3) == 1
     if not is_owner and not is_superadmin and not meeting.allow_edit:
@@ -562,15 +643,6 @@ async def delete_action_item(
 
 
 # === 會議可見性修改 ===
-
-
-from pydantic import BaseModel as _BaseModel
-
-
-class VisibilityUpdate(_BaseModel):
-    """可見性與編輯權限修改請求。"""
-    visibility: str | None = None
-    allow_edit: bool | None = None
 
 
 @router.put("/{meeting_id}/visibility")
