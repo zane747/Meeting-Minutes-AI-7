@@ -17,20 +17,46 @@
     </div>
     {% endif %}
 
+    <!-- 搜尋與過濾列 -->
+    <div class="flex flex-wrap gap-3 mb-4">
+        <input id="search-keyword" type="text" placeholder="搜尋帳號名稱..."
+               class="flex-1 min-w-[180px] px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+               oninput="filterAccounts()">
+        <select id="filter-role" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onchange="filterAccounts()">
+            <option value="">所有角色</option>
+            <option value="1">超級管理員</option>
+            <option value="2">管理員</option>
+            <option value="3">一般使用者</option>
+        </select>
+        <select id="filter-status" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onchange="filterAccounts()">
+            <option value="">所有狀態</option>
+            <option value="active">啟用</option>
+            <option value="inactive">停用</option>
+        </select>
+        <button type="button" onclick="clearFilters()" class="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300">清除</button>
+    </div>
+    <p id="filter-no-result" class="hidden text-center text-gray-400 text-sm py-4 mb-4">找不到符合條件的帳號</p>
+
     <div class="bg-white shadow-md rounded-lg overflow-hidden">
         <table class="w-full">
             <thead class="bg-gray-50 border-b">
                 <tr>
                     <th class="px-6 py-3 text-left text-sm font-medium text-gray-500">帳號</th>
-                    <th class="px-6 py-3 text-left text-sm font-medium text-gray-500">角色</th>
-                    <th class="px-6 py-3 text-left text-sm font-medium text-gray-500">狀態</th>
-                    <th class="px-6 py-3 text-left text-sm font-medium text-gray-500">建立時間</th>
+                    <th class="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-800 select-none" onclick="sortAccounts('role')">角色 <span id="sort-icon-role" class="text-xs"></span></th>
+                    <th class="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-800 select-none" onclick="sortAccounts('status')">狀態 <span id="sort-icon-status" class="text-xs"></span></th>
+                    <th class="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-800 select-none" onclick="sortAccounts('date')">建立時間 <span id="sort-icon-date" class="text-xs"></span></th>
                     <th class="px-6 py-3 text-right text-sm font-medium text-gray-500">操作</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-200">
                 {% for user in users %}
-                <tr>
+                <tr class="account-row"
+                    data-username="{{ user.username|lower }}"
+                    data-role="{{ user.role }}"
+                    data-status="{{ 'active' if user.is_active else 'inactive' }}"
+                    data-date="{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}">
                     <td class="px-6 py-4 text-sm text-gray-900">
                         {{ user.username }}
                         {% if user.id == current_user.user_id %}
@@ -111,6 +137,75 @@
 
 {% block scripts %}
 <script>
+function filterAccounts() {
+    const keyword = document.getElementById('search-keyword').value.toLowerCase().trim();
+    const role = document.getElementById('filter-role').value;
+    const status = document.getElementById('filter-status').value;
+    const rows = document.querySelectorAll('.account-row');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        const matchKeyword = !keyword || row.dataset.username.includes(keyword);
+        const matchRole = !role || row.dataset.role === role;
+        const matchStatus = !status || row.dataset.status === status;
+
+        if (matchKeyword && matchRole && matchStatus) {
+            row.classList.remove('hidden');
+            visibleCount++;
+        } else {
+            row.classList.add('hidden');
+        }
+    });
+
+    document.getElementById('filter-no-result').classList.toggle('hidden', visibleCount > 0);
+}
+
+let currentSort = { key: null, asc: true };
+
+function sortAccounts(key) {
+    const tbody = document.querySelector('.account-row')?.parentElement;
+    if (!tbody) return;
+
+    if (currentSort.key === key) {
+        currentSort.asc = !currentSort.asc;
+    } else {
+        currentSort.key = key;
+        currentSort.asc = true;
+    }
+
+    // 更新排序圖示
+    document.querySelectorAll('[id^="sort-icon-"]').forEach(el => el.textContent = '');
+    const icon = document.getElementById(`sort-icon-${key}`);
+    if (icon) icon.textContent = currentSort.asc ? '\u25B2' : '\u25BC';
+
+    const rows = Array.from(tbody.querySelectorAll('.account-row'));
+    rows.sort((a, b) => {
+        let va, vb;
+        if (key === 'role') {
+            va = parseInt(a.dataset.role);
+            vb = parseInt(b.dataset.role);
+        } else if (key === 'status') {
+            va = a.dataset.status;
+            vb = b.dataset.status;
+        } else if (key === 'date') {
+            va = a.dataset.date;
+            vb = b.dataset.date;
+        }
+        if (va < vb) return currentSort.asc ? -1 : 1;
+        if (va > vb) return currentSort.asc ? 1 : -1;
+        return 0;
+    });
+
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+function clearFilters() {
+    document.getElementById('search-keyword').value = '';
+    document.getElementById('filter-role').value = '';
+    document.getElementById('filter-status').value = '';
+    filterAccounts();
+}
+
 async function toggleActive(userId, username) {
     const res = await fetch(`/api/accounts/${userId}/toggle-active`, { method: 'POST' });
     const data = await res.json();

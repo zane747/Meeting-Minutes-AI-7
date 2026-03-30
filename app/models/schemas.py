@@ -157,6 +157,7 @@ class MeetingStatusResponse(BaseModel):
     status: str
     provider: str | None
     error_message: str | None
+    progress_step: str | None = None
 
     model_config = {"from_attributes": True}
 

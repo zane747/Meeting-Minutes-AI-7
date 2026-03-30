@@ -1,18 +1,18 @@
 """管理中心路由（等級 1 超級管理員專屬）。"""
 
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import require_role
-from app.models.database_models import Meeting
+from app.models.database_models import Meeting, MeetingStatus, User
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +28,39 @@ async def admin_dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_role(1)),  # 僅等級 1
 ) -> HTMLResponse:
-    """管理中心：顯示所有會議紀錄（含上傳者資訊）。"""
-    result = await db.execute(
-        select(Meeting)
-        .options(selectinload(Meeting.creator))
-        .order_by(Meeting.created_at.desc())
-    )
-    meetings = list(result.scalars().all())
+    """管理中心：系統總覽儀表板。"""
+    today = datetime.utcnow().date()
+    today_start = datetime(today.year, today.month, today.day)
+
+    # 統計數據（並行查詢）
+    total_users = (await db.execute(select(func.count(User.id)))).scalar() or 0
+    active_users = (await db.execute(
+        select(func.count(User.id)).where(User.is_active == True)
+    )).scalar() or 0
+    total_meetings = (await db.execute(select(func.count(Meeting.id)))).scalar() or 0
+    today_meetings = (await db.execute(
+        select(func.count(Meeting.id)).where(Meeting.created_at >= today_start)
+    )).scalar() or 0
+    completed_meetings = (await db.execute(
+        select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.COMPLETED)
+    )).scalar() or 0
+    failed_meetings = (await db.execute(
+        select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.FAILED)
+    )).scalar() or 0
+
+    stats = {
+        "total_users": total_users,
+        "active_users": active_users,
+        "total_meetings": total_meetings,
+        "today_meetings": today_meetings,
+        "completed_meetings": completed_meetings,
+        "failed_meetings": failed_meetings,
+    }
 
     response = templates.TemplateResponse(
         request=request,
         name="admin_dashboard.html",
-        context={"meetings": meetings, "current_user": current_user},
+        context={"stats": stats, "current_user": current_user},
     )
     response.headers["Cache-Control"] = "no-store"
     return response

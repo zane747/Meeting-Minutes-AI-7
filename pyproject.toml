@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-local = ["openai-whisper"]
+local = ["openai-whisper", "torch"]
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -41,3 +41,11 @@ quote-style = "double"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }

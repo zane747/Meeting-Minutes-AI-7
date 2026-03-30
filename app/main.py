@@ -61,6 +61,7 @@ app = FastAPI(
     description="AI 驅動的會議紀錄應用程式",
     version="0.1.0",
     lifespan=lifespan,
+    debug=True,
 )
 
 # === Session 中間件 ===

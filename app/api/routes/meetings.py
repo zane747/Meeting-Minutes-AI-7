@@ -3,7 +3,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -39,11 +39,11 @@ async def upload_and_process(
     current_user: dict = Depends(get_current_user),
     textgrid: UploadFile | None = None,
     rttm: UploadFile | None = None,
-    title: str | None = None,
+    title: str | None = Form(None),
     mode: str | None = Query(None),
-    skip_transcription: bool = False,
-    duration: float = 0.0,
-    visibility: str = "private",
+    skip_transcription: bool = Query(False),
+    duration: float = Form(0.0),
+    visibility: str = Form("private"),
 ) -> UploadResponse:
     """上傳音檔（+ TextGrid/RTTM 選填）+ 自動觸發 AI 處理。
 
@@ -374,6 +374,8 @@ async def update_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
 
+    _check_edit_permission(meeting, current_user)
+
     if data.title is not None:
         meeting.title = data.title
     if data.transcript is not None:
@@ -441,6 +443,17 @@ async def delete_meeting_audio(
     return MessageResponse(detail="音檔已刪除")
 
 
+# === 編輯權限檢查 ===
+
+
+def _check_edit_permission(meeting: Meeting, current_user: dict) -> None:
+    """檢查當前使用者是否有編輯權限。非持有者需要 allow_edit=True，等級 1 例外。"""
+    is_owner = meeting.created_by == current_user["user_id"]
+    is_superadmin = current_user.get("role", 3) == 1
+    if not is_owner and not is_superadmin and not meeting.allow_edit:
+        raise HTTPException(status_code=403, detail="持有者未開放編輯權限")
+
+
 # === Action Items CRUD ===
 
 
@@ -464,6 +477,8 @@ async def create_action_item(
     meeting = await db.get(Meeting, meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
+
+    _check_edit_permission(meeting, current_user)
 
     action = ActionItem(
         meeting_id=meeting_id,
@@ -500,6 +515,9 @@ async def update_action_item(
     if not action or action.meeting_id != meeting_id:
         raise HTTPException(status_code=404, detail="Action Item 不存在")
 
+    meeting = await db.get(Meeting, meeting_id)
+    _check_edit_permission(meeting, current_user)
+
     if data.description is not None:
         action.description = data.description
     if data.assignee is not None:
@@ -535,6 +553,9 @@ async def delete_action_item(
     if not action or action.meeting_id != meeting_id:
         raise HTTPException(status_code=404, detail="Action Item 不存在")
 
+    meeting = await db.get(Meeting, meeting_id)
+    _check_edit_permission(meeting, current_user)
+
     await db.delete(action)
     await db.commit()
     return MessageResponse(detail="Action Item 已刪除")
@@ -547,8 +568,9 @@ from pydantic import BaseModel as _BaseModel
 
 
 class VisibilityUpdate(_BaseModel):
-    """可見性修改請求。"""
-    visibility: str
+    """可見性與編輯權限修改請求。"""
+    visibility: str | None = None
+    allow_edit: bool | None = None
 
 
 @router.put("/{meeting_id}/visibility")
@@ -558,10 +580,7 @@ async def update_visibility(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """修改會議紀錄的可見性。只有上傳者本人或等級 1 可以修改。"""
-    if data.visibility not in ("public", "private", "same_level"):
-        raise HTTPException(status_code=400, detail="可見性值無效")
-
+    """修改會議紀錄的可見性與編輯權限。只有上傳者本人或等級 1 可以修改。"""
     meeting = await db.get(Meeting, meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="會議紀錄不存在")
@@ -570,6 +589,13 @@ async def update_visibility(
     if meeting.created_by != current_user["user_id"] and current_user.get("role", 3) != 1:
         raise HTTPException(status_code=403, detail="權限不足")
 
-    meeting.visibility = data.visibility
+    if data.visibility is not None:
+        if data.visibility not in ("public", "private", "same_level"):
+            raise HTTPException(status_code=400, detail="可見性值無效")
+        meeting.visibility = data.visibility
+
+    if data.allow_edit is not None:
+        meeting.allow_edit = data.allow_edit
+
     await db.commit()
-    return {"detail": f"可見性已變更為 {data.visibility}"}
+    return {"detail": "設定已更新"}

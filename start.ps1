@@ -22,8 +22,20 @@ if (-not (Test-Path ".env")) {
     Write-Host ""
 }
 
+# 啟動 Ollama（若已安裝且未執行）
+if (Get-Command ollama -ErrorAction SilentlyContinue) {
+    if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+        Write-Host "  [INFO] Starting Ollama..." -ForegroundColor White
+        Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
+        Start-Sleep 2
+        Write-Host "  [INFO] Ollama started" -ForegroundColor Green
+    } else {
+        Write-Host "  [INFO] Ollama already running" -ForegroundColor Green
+    }
+}
+
 Write-Host "  [1/2] Syncing dependencies..." -ForegroundColor White
-uv sync
+uv sync --extra local
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "  [ERROR] Sync failed" -ForegroundColor Red

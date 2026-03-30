@@ -92,6 +92,12 @@ class Meeting(Base):
     visibility: Mapped[str] = mapped_column(
         String(20), nullable=False, default="public"
     )  # 可見性：public / private / same_level（DB 預設 public 給既有資料，新上傳在應用層設 private）
+    allow_edit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )  # 是否允許他人編輯（持有者控制）
+    progress_step: Mapped[str | None] = mapped_column(
+        String(30), nullable=True
+    )  # 處理進度：health_check / transcribing / summarizing / saving
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )

@@ -57,8 +57,8 @@ async def register_page(request: Request) -> HTMLResponse:
 @router.post("/register", response_class=HTMLResponse)
 async def register(
     request: Request,
-    username: str = Form(...),    # 從表單的 <input name="username"> 取值
-    password: str = Form(...),    # 從表單的 <input name="password"> 取值
+    username: str = Form(...),
+    password: str = Form(...),
     db: AsyncSession = Depends(get_db),  # 資料庫連線（自動注入）
 ) -> HTMLResponse:
     """處理註冊表單。
@@ -72,6 +72,9 @@ async def register(
     # 因為前端驗證可以被繞過！使用者可以用瀏覽器開發者工具改掉 HTML，
     # 或直接用工具（curl、Postman）發請求，完全跳過前端。
     # 所以後端驗證是「最後一道防線」，絕對不能省。
+
+    import sys
+    print(f"=== REGISTER CALLED: username={username} ===", flush=True, file=sys.stderr)
 
     if len(username) < 3 or len(username) > 30:
         return templates.TemplateResponse(
@@ -101,7 +104,11 @@ async def register(
     # 為什麼要先查帳號是否存在，而不是直接建立讓資料庫報錯？
     # 因為資料庫報錯的訊息對使用者不友善（會是英文的 UNIQUE constraint 錯誤），
     # 我們想給使用者看到清楚的中文提示「此帳號已被使用」。
-    existing_user = await auth_service.get_user_by_username(db, username)
+    try:
+        existing_user = await auth_service.get_user_by_username(db, username)
+    except Exception as e:
+        logger.error(f"REGISTER ERROR (get_user): {e}", exc_info=True)
+        raise
     if existing_user:
         return templates.TemplateResponse(
             request=request,
@@ -110,7 +117,11 @@ async def register(
         )
 
     # 建立使用者（密碼會在 auth_service 裡被 bcrypt 雜湊後才存入資料庫）
-    user = await auth_service.create_user(db, username, password)
+    try:
+        user = await auth_service.create_user(db, username, password)
+    except Exception as e:
+        logger.error(f"REGISTER ERROR (create_user): {e}", exc_info=True)
+        raise
 
     # 為什麼註冊完要自動登入？
     # 使用者體驗考量——註冊完還要再手動輸入一次帳號密碼去登入，很煩。

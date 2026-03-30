@@ -7,6 +7,8 @@
 
 import logging
 
+import httpx
+
 from app.config import settings
 from app.core.exceptions import ProcessingError, ProviderUnavailableError
 from app.services.providers.base import (
@@ -52,10 +54,14 @@ class LocalWhisperProvider(AudioProcessor):
             return
 
         try:
+            import torch
             import whisper
 
-            logger.info(f"載入 Whisper 模型：{self._model_size}")
-            LocalWhisperProvider._model = whisper.load_model(self._model_size)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"載入 Whisper 模型：{self._model_size}（裝置：{device}）")
+            LocalWhisperProvider._model = whisper.load_model(
+                self._model_size, device=device
+            )
             LocalWhisperProvider._cached_model_size = self._model_size
             logger.info("Whisper 模型載入完成")
         except ImportError:

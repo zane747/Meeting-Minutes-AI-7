@@ -40,26 +40,35 @@ async def process_meeting(
             return
 
         try:
-            # 健康檢查
+            # 步驟 1：健康檢查
+            meeting.progress_step = "health_check"
+            await db.commit()
+
             if not await processor.health_check():
                 meeting.status = MeetingStatus.FAILED
                 meeting.error_message = (
                     f"{processor.get_provider_name()} 無法連線"
                 )
+                meeting.progress_step = None
                 await db.commit()
                 return
 
-            # 執行 AI 處理（傳入 context）
+            # 步驟 2：語音轉錄
+            meeting.progress_step = "transcribing"
+            await db.commit()
+
             logger.info(
                 f"開始處理 Meeting {meeting_id}"
                 f"（Provider: {processor.get_provider_name()}）"
             )
             result = await processor.process(meeting.file_path, context)
 
-            # 儲存結果
+            # 步驟 3：儲存結果
+            meeting.progress_step = "saving"
+            await db.commit()
+
             meeting.transcript = result.transcript
             meeting.summary = result.summary
-            meeting.status = MeetingStatus.COMPLETED
 
             # 若使用者未填標題，使用 AI 建議標題
             if not meeting.title and result.suggested_title:
@@ -75,7 +84,9 @@ async def process_meeting(
                 )
                 db.add(action)
 
+            meeting.status = MeetingStatus.COMPLETED
             meeting.error_message = None
+            meeting.progress_step = None
             await db.commit()
             logger.info(f"Meeting {meeting_id} 處理完成")
 

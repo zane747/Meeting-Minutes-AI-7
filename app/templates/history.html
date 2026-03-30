@@ -6,9 +6,41 @@
 <h1 class="text-2xl font-bold text-gray-800 mb-6">歷史紀錄</h1>
 
 {% if meetings %}
-<div class="space-y-3">
+<!-- 搜尋列 -->
+<div class="flex flex-wrap gap-3 mb-4">
+    <input id="search-keyword" type="text" placeholder="搜尋標題、檔名、持有者..."
+           class="flex-1 min-w-[180px] px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+           oninput="filterMeetings()">
+    <input id="search-date" type="date"
+           class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+           onchange="filterMeetings()">
+    <select id="filter-status" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onchange="filterMeetings()">
+        <option value="">所有狀態</option>
+        <option value="completed">完成</option>
+        <option value="processing">處理中</option>
+        <option value="failed">失敗</option>
+    </select>
+    <select id="filter-visibility" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onchange="filterMeetings()">
+        <option value="">所有可見性</option>
+        <option value="public">公開</option>
+        <option value="private">私人</option>
+        <option value="same_level">同級</option>
+    </select>
+    <button type="button" onclick="clearSearch()" class="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300">清除</button>
+</div>
+<p id="search-no-result" class="hidden text-center text-gray-400 text-sm py-4">找不到符合條件的紀錄</p>
+
+<div id="meeting-list" class="space-y-3">
     {% for m in meetings %}
-    <div class="bg-white border rounded-lg p-4 flex items-center justify-between hover:shadow-sm transition">
+    <div class="meeting-card bg-white border rounded-lg p-4 flex items-center justify-between hover:shadow-sm transition"
+         data-title="{{ (m.title or m.file_name)|lower }}"
+         data-file="{{ m.file_name|lower }}"
+         data-date="{{ m.created_at.strftime('%Y-%m-%d') }}"
+         data-owner="{{ m.creator.username|lower if m.creator else '' }}"
+         data-status="{{ m.status.value }}"
+         data-visibility="{{ m.visibility }}">
         <a href="/meetings/{{ m.id }}" class="flex-1">
             <div class="flex items-center gap-4">
                 <div class="flex-1">
@@ -22,6 +54,11 @@
                         {% endif %}
                         <span>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
                     </div>
+                    {% if m.creator %}
+                    <div class="text-xs text-gray-500 mt-1">
+                        <span>持有者：{{ m.creator.username }}{% if m.creator.role == 1 %}（超級管理員）{% elif m.creator.role == 2 %}（管理員）{% else %}（一般使用者）{% endif %}</span>
+                    </div>
+                    {% endif %}
                 </div>
                 <div class="flex items-center gap-3">
                     <!-- 狀態標籤 -->
@@ -31,6 +68,17 @@
                     <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">處理中</span>
                     {% elif m.status.value == 'failed' %}
                     <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">失敗</span>
+                    {% endif %}
+                    <!-- 可見性 -->
+                    {% if m.visibility == 'public' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">公開</span>
+                    {% elif m.visibility == 'private' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">私人</span>
+                    {% elif m.visibility == 'same_level' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">同級</span>
+                    {% endif %}
+                    {% if m.allow_edit %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">開放編輯</span>
                     {% endif %}
                     <!-- Provider -->
                     <span class="text-xs text-gray-400">{{ m.provider or '' }}</span>
@@ -44,6 +92,7 @@
     </div>
     {% endfor %}
 </div>
+</div>
 {% else %}
 <div class="text-center py-16">
     <p class="text-gray-400 text-lg mb-4">還沒有會議紀錄</p>
@@ -54,6 +103,39 @@
 
 {% block scripts %}
 <script>
+function filterMeetings() {
+    const keyword = document.getElementById('search-keyword').value.toLowerCase().trim();
+    const date = document.getElementById('search-date').value;
+    const status = document.getElementById('filter-status').value;
+    const visibility = document.getElementById('filter-visibility').value;
+    const cards = document.querySelectorAll('.meeting-card');
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+        const matchKeyword = !keyword || card.dataset.title.includes(keyword) || card.dataset.file.includes(keyword) || card.dataset.owner.includes(keyword);
+        const matchDate = !date || card.dataset.date === date;
+        const matchStatus = !status || card.dataset.status === status;
+        const matchVisibility = !visibility || card.dataset.visibility === visibility;
+
+        if (matchKeyword && matchDate && matchStatus && matchVisibility) {
+            card.classList.remove('hidden');
+            visibleCount++;
+        } else {
+            card.classList.add('hidden');
+        }
+    });
+
+    document.getElementById('search-no-result').classList.toggle('hidden', visibleCount > 0);
+}
+
+function clearSearch() {
+    document.getElementById('search-keyword').value = '';
+    document.getElementById('search-date').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-visibility').value = '';
+    filterMeetings();
+}
+
 async function deleteMeeting(id) {
     if (!confirm('確定要刪除此會議紀錄？此操作無法復原。')) return;
     const resp = await fetch(`/api/meetings/${id}`, {method: 'DELETE'});

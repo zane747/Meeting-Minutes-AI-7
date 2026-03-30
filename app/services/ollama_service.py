@@ -13,7 +13,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_SUMMARY_PROMPT = """你是一位專業的會議記錄助理。以下是一段會議的逐字稿，請分析後以 JSON 格式回傳：
+OLLAMA_SUMMARY_PROMPT = """你是一位專業的會議記錄助理。今天的日期是 {today}。以下是一段會議的逐字稿，請分析後以 JSON 格式回傳：
 
 1. summary：會議摘要（Markdown 格式），包含：
    - 會議主題
@@ -46,7 +46,8 @@ async def generate_summary(transcript: str) -> dict | None:
     Returns:
         包含 summary、action_items、suggested_title 的字典，或 None（若失敗）。
     """
-    prompt = OLLAMA_SUMMARY_PROMPT.format(transcript=transcript)
+    from datetime import date
+    prompt = OLLAMA_SUMMARY_PROMPT.format(transcript=transcript, today=date.today().isoformat())
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:

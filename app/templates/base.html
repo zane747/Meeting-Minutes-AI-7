@@ -36,7 +36,9 @@
                 {% endif %}
 
                 <span class="text-gray-500">|</span>
-                <span class="text-sm text-gray-600">{{ current_user.username }}</span>
+                <span class="text-sm text-gray-600">{{ current_user.username }}
+                    <span class="text-xs text-gray-400">{% if current_user.role == 1 %}(超級管理員){% elif current_user.role == 2 %}(管理員){% else %}(一般使用者){% endif %}</span>
+                </span>
                 <a href="/accounts/change-password" class="text-sm text-gray-500 hover:text-gray-700">修改密碼</a>
                 <!--
                 登出按鈕用 <form> 包裹，因為登出必須用 POST 方法。

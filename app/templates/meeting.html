@@ -12,28 +12,67 @@
 </div>
 {% elif meeting.status.value == 'processing' %}
 <!-- 處理中 -->
-<div id="status-area"
-     hx-get="/api/meetings/{{ meeting.id }}/status"
-     hx-trigger="every 2s"
-     hx-swap="innerHTML"
-     class="text-center py-16">
+<div id="status-area" class="text-center py-16">
     <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-    <p class="text-lg text-gray-600">AI 處理中...</p>
-    <p class="text-sm text-gray-400 mt-1">使用 {{ meeting.provider }} 模式</p>
+    <p class="text-lg text-gray-600 mb-1">AI 處理中...</p>
+    <p class="text-sm text-gray-400 mb-4">使用 {{ meeting.provider }} 模式</p>
+    <div class="max-w-md mx-auto">
+        <div class="w-full bg-gray-200 rounded-full h-2.5">
+            <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-1000" style="width: 0%"></div>
+        </div>
+        <p id="progress-text" class="text-xs text-gray-400 mt-2">準備中...</p>
+    </div>
+    <button type="button" id="cancel-processing-btn" onclick="cancelProcessing()"
+            class="mt-6 px-4 py-2 bg-red-100 text-red-600 font-medium rounded-md hover:bg-red-200 transition text-sm">
+        取消處理
+    </button>
 </div>
 
 <script>
-// 輪詢：當狀態變為 completed 或 failed 時重新載入頁面
-document.body.addEventListener('htmx:afterRequest', function(e) {
-    if (e.detail.target.id === 'status-area') {
+(function() {
+    const meetingId = '{{ meeting.id }}';
+    const bar = document.getElementById('progress-bar');
+    const text = document.getElementById('progress-text');
+
+    const stepMap = {
+        'health_check':  { percent: 15,  label: '檢查服務狀態...' },
+        'transcribing':  { percent: 50,  label: '語音轉錄中（這一步較花時間）...' },
+        'saving':        { percent: 90,  label: '儲存結果中...' },
+    };
+
+    window.cancelProcessing = async function() {
+        if (!confirm('確定要取消處理？此會議紀錄將被刪除。')) return;
+        const resp = await fetch(`/api/meetings/${meetingId}`, {method: 'DELETE'});
+        if (resp.ok) {
+            window.location.href = '/meetings';
+        } else {
+            alert('取消失敗，請稍後再試');
+        }
+    };
+
+    // 輪詢：每 2 秒檢查狀態
+    const pollInterval = setInterval(async () => {
         try {
-            const data = JSON.parse(e.detail.xhr.responseText);
+            const resp = await fetch(`/api/meetings/${meetingId}/status`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+
             if (data.status !== 'processing') {
-                window.location.reload();
+                clearInterval(pollInterval);
+                bar.style.width = '100%';
+                text.textContent = '完成！重新載入中...';
+                setTimeout(() => window.location.reload(), 500);
+                return;
+            }
+
+            const step = stepMap[data.progress_step];
+            if (step) {
+                bar.style.width = step.percent + '%';
+                text.textContent = step.label;
             }
         } catch(err) {}
-    }
-});
+    }, 2000);
+})();
 </script>
 
 {% elif meeting.status.value == 'failed' %}
@@ -58,11 +97,58 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
 {% elif meeting.status.value == 'completed' %}
 <!-- 完成 -->
 <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-gray-800">
+    <!-- 標題顯示模式 -->
+    <h1 id="title-display" class="text-2xl font-bold text-gray-800 {% if can_edit %}cursor-pointer hover:text-blue-700{% endif %}"
+        {% if can_edit %}onclick="editTitle()" title="點擊編輯標題"{% endif %}>
         {{ meeting.title or meeting.file_name }}
     </h1>
-    <span class="text-sm text-gray-400">{{ meeting.provider }} 模式</span>
+    <!-- 標題編輯模式（預設隱藏） -->
+    <div id="title-edit" class="hidden flex items-center gap-2">
+        <input id="title-input" type="text" value="{{ meeting.title or meeting.file_name }}"
+               class="text-2xl font-bold text-gray-800 border-b-2 border-blue-500 outline-none bg-transparent w-full">
+        <button type="button" onclick="saveTitle()" class="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">儲存</button>
+        <button type="button" onclick="cancelEditTitle()" class="text-sm px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">取消</button>
+    </div>
+    <div class="flex items-center gap-3">
+        <!-- 可見性標籤 -->
+        {% if meeting.visibility == 'public' %}
+        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">公開</span>
+        {% elif meeting.visibility == 'private' %}
+        <span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">私人</span>
+        {% elif meeting.visibility == 'same_level' %}
+        <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">同級可見</span>
+        {% endif %}
+        {% if meeting.allow_edit %}
+        <span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">開放編輯</span>
+        {% endif %}
+        <span class="text-sm text-gray-400">{{ meeting.provider }} 模式</span>
+    </div>
 </div>
+
+<!-- 持有者設定區 -->
+{% if is_owner %}
+<div class="bg-gray-50 border rounded-lg p-4 mb-6">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3">權限設定</h3>
+    <div class="flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-2">
+            <label class="text-sm text-gray-600">可見性：</label>
+            <select id="visibility-select" class="text-sm border rounded px-2 py-1">
+                <option value="private" {% if meeting.visibility == 'private' %}selected{% endif %}>私人（僅自己）</option>
+                <option value="public" {% if meeting.visibility == 'public' %}selected{% endif %}>公開（所有人）</option>
+                <option value="same_level" {% if meeting.visibility == 'same_level' %}selected{% endif %}>同級可見</option>
+            </select>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-sm text-gray-600">允許他人編輯：</label>
+            <input type="checkbox" id="allow-edit-checkbox" {% if meeting.allow_edit %}checked{% endif %}>
+        </div>
+        <button type="button" onclick="savePermissions()"
+                class="text-sm px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700">
+            儲存設定
+        </button>
+    </div>
+</div>
+{% endif %}
 
 <!-- 標註檔資訊 -->
 {% if meeting.annotation_files %}
@@ -80,7 +166,8 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     <section>
         <h2 class="text-lg font-semibold text-gray-700 mb-3">逐字稿</h2>
         <textarea name="transcript" rows="12"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.transcript or '' }}</textarea>
+                  {% if not can_edit %}readonly{% endif %}
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 {% if not can_edit %}bg-gray-50{% endif %}">{{ meeting.transcript or '' }}</textarea>
     </section>
 
     <!-- 摘要 -->
@@ -88,7 +175,8 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     <section>
         <h2 class="text-lg font-semibold text-gray-700 mb-3">會議摘要</h2>
         <textarea name="summary" rows="8"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ meeting.summary }}</textarea>
+                  {% if not can_edit %}readonly{% endif %}
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 {% if not can_edit %}bg-gray-50{% endif %}">{{ meeting.summary }}</textarea>
     </section>
     {% else %}
     <section>
@@ -108,11 +196,13 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     <!-- Action Items -->
     <section>
         <div class="flex items-center justify-between mb-3">
-            <h2 class="text-lg font-semibold text-gray-700">Action Items</h2>
+            <h2 class="text-lg font-semibold text-gray-700">待辦事項</h2>
+            {% if can_edit %}
             <button type="button" onclick="addActionItem()"
                     class="text-sm px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">
                 新增
             </button>
+            {% endif %}
         </div>
 
         {% if meeting.action_items %}
@@ -120,9 +210,10 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
             {% for item in meeting.action_items %}
             <div class="flex items-start gap-3 p-3 bg-white border rounded-lg" data-id="{{ item.id }}">
                 <input type="checkbox" {% if item.is_completed %}checked{% endif %}
-                       onchange="toggleAction('{{ item.id }}', this.checked)"
+                       {% if can_edit %}onchange="toggleAction('{{ item.id }}', this.checked)"{% else %}disabled{% endif %}
                        class="mt-1">
-                <div class="flex-1">
+                <!-- 顯示模式 -->
+                <div class="flex-1 action-display" data-id="{{ item.id }}">
                     <p class="{% if item.is_completed %}line-through text-gray-400{% else %}text-gray-800{% endif %}">
                         {{ item.description }}
                     </p>
@@ -131,8 +222,28 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
                         {% if item.due_date %}<span>截止：{{ item.due_date }}</span>{% endif %}
                     </div>
                 </div>
+                <!-- 編輯模式（預設隱藏） -->
+                <div class="flex-1 action-edit hidden" data-id="{{ item.id }}">
+                    <div class="space-y-2">
+                        <input type="text" class="edit-desc w-full text-sm border rounded px-2 py-1" value="{{ item.description }}">
+                        <div class="flex gap-2">
+                            <input type="text" class="edit-assignee text-sm border rounded px-2 py-1 w-1/2" placeholder="負責人" value="{{ item.assignee or '' }}">
+                            <input type="date" class="edit-due text-sm border rounded px-2 py-1 w-1/2" value="{{ item.due_date or '' }}">
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="saveAction('{{ meeting.id }}', '{{ item.id }}')"
+                                    class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">儲存</button>
+                            <button type="button" onclick="cancelEditAction('{{ item.id }}')"
+                                    class="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">取消</button>
+                        </div>
+                    </div>
+                </div>
+                {% if can_edit %}
+                <button type="button" onclick="editAction('{{ item.id }}')"
+                        class="text-blue-400 hover:text-blue-600 text-sm action-edit-btn" data-id="{{ item.id }}">編輯</button>
                 <button type="button" onclick="deleteAction('{{ meeting.id }}', '{{ item.id }}')"
                         class="text-red-400 hover:text-red-600 text-sm">刪除</button>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -144,18 +255,20 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     </section>
 
     <!-- 儲存按鈕 -->
+    {% if can_edit %}
     <div class="flex gap-3">
         <button type="button" onclick="saveMeeting()"
                 class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700">
             儲存
         </button>
-        {% if meeting.file_path %}
+        {% if meeting.file_path and is_owner %}
         <button type="button" onclick="deleteAudio()"
                 class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">
             刪除音檔
         </button>
         {% endif %}
     </div>
+    {% endif %}
 </form>
 {% endif %}
 {% endblock %}
@@ -164,6 +277,49 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
 {% if meeting and meeting.status.value == 'completed' %}
 <script>
 const meetingId = '{{ meeting.id }}';
+
+function editTitle() {
+    document.getElementById('title-display').classList.add('hidden');
+    document.getElementById('title-edit').classList.remove('hidden');
+    document.getElementById('title-input').focus();
+}
+
+function cancelEditTitle() {
+    document.getElementById('title-display').classList.remove('hidden');
+    document.getElementById('title-edit').classList.add('hidden');
+}
+
+async function saveTitle() {
+    const title = document.getElementById('title-input').value.trim();
+    if (!title) { alert('標題不可為空'); return; }
+    const resp = await fetch(`/api/meetings/${meetingId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title}),
+    });
+    if (resp.ok) {
+        window.location.reload();
+    } else {
+        alert('標題儲存失敗');
+    }
+}
+
+async function savePermissions() {
+    const visibility = document.getElementById('visibility-select')?.value;
+    const allowEdit = document.getElementById('allow-edit-checkbox')?.checked;
+    const resp = await fetch(`/api/meetings/${meetingId}/visibility`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({visibility, allow_edit: allowEdit}),
+    });
+    if (resp.ok) {
+        alert('設定已儲存');
+        window.location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.detail || '設定儲存失敗');
+    }
+}
 
 async function saveMeeting() {
     const form = document.getElementById('edit-form');
@@ -206,6 +362,38 @@ function addActionItem() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({description: desc}),
     }).then(() => window.location.reload());
+}
+
+function editAction(actionId) {
+    document.querySelector(`.action-display[data-id="${actionId}"]`).classList.add('hidden');
+    document.querySelector(`.action-edit[data-id="${actionId}"]`).classList.remove('hidden');
+    document.querySelector(`.action-edit-btn[data-id="${actionId}"]`).classList.add('hidden');
+}
+
+function cancelEditAction(actionId) {
+    document.querySelector(`.action-display[data-id="${actionId}"]`).classList.remove('hidden');
+    document.querySelector(`.action-edit[data-id="${actionId}"]`).classList.add('hidden');
+    document.querySelector(`.action-edit-btn[data-id="${actionId}"]`).classList.remove('hidden');
+}
+
+async function saveAction(meetingId, actionId) {
+    const editDiv = document.querySelector(`.action-edit[data-id="${actionId}"]`);
+    const description = editDiv.querySelector('.edit-desc').value.trim();
+    const assignee = editDiv.querySelector('.edit-assignee').value.trim() || null;
+    const due_date = editDiv.querySelector('.edit-due').value || null;
+
+    if (!description) { alert('描述不可為空'); return; }
+
+    const resp = await fetch(`/api/meetings/${meetingId}/actions/${actionId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({description, assignee, due_date}),
+    });
+    if (resp.ok) {
+        window.location.reload();
+    } else {
+        alert('儲存失敗');
+    }
 }
 
 async function deleteAudio() {
