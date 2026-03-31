@@ -92,7 +92,7 @@
 
 - [x] T020 確認所有 API 端點都有 Depends(get_current_user) 權限檢查
 - [x] T021 [P] 確認前後端欄位名稱對齊（Pydantic schema vs Jinja2 模板 vs JS fetch）
-- [ ] T022 手動測試完整流程：建立 → 列表 → 詳情 → 編輯 → 置頂 → 刪除
+- [x] T022 手動測試完整流程：建立 → 列表 → 詳情 → 編輯 → 置頂 → 刪除
 
 ---
 
