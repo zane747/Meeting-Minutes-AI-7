@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ '編輯公告' if announcement else '發布公告' }} - Meeting Minutes AI{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ '編輯公告' if announcement else '發布公告' }}</h1>
+
+    <form id="announcement-form" class="space-y-6">
+        <div>
+            <label for="title" class="block text-sm font-medium text-gray-700 mb-2">
+                標題 <span class="text-red-500">*</span>
+            </label>
+            <input type="text" id="title" name="title" maxlength="255" required
+                   value="{{ announcement.title if announcement else '' }}"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <p class="text-xs text-gray-400 mt-1">最多 255 字元</p>
+        </div>
+
+        <div>
+            <label for="content" class="block text-sm font-medium text-gray-700 mb-2">
+                內容 <span class="text-red-500">*</span>
+            </label>
+            <textarea id="content" name="content" rows="10" maxlength="5000" required
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{{ announcement.content if announcement else '' }}</textarea>
+            <p class="text-xs text-gray-400 mt-1">最多 5,000 字元</p>
+        </div>
+
+        <div class="flex gap-3">
+            <button type="submit"
+                    class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700">
+                {{ '儲存' if announcement else '發布' }}
+            </button>
+            <a href="/announcements" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-center">
+                取消
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const form = document.getElementById('announcement-form');
+const isEdit = {{ 'true' if announcement else 'false' }};
+const announcementId = '{{ announcement.id if announcement else '' }}';
+
+form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const title = document.getElementById('title').value.trim();
+    const content = document.getElementById('content').value.trim();
+
+    if (!title || !content) {
+        alert('標題和內容為必填');
+        return;
+    }
+
+    const url = isEdit ? `/api/announcements/${announcementId}` : '/api/announcements';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const resp = await fetch(url, {
+        method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title, content}),
+    });
+
+    if (resp.ok) {
+        window.location.href = '/announcements';
+    } else {
+        const err = await resp.json();
+        alert(err.detail || '操作失敗');
+    }
+});
+</script>
+{% endblock %}

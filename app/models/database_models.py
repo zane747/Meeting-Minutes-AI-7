@@ -150,3 +150,27 @@ class AnnotationFile(Base):
     parsed_data: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="annotation_files")
+
+
+class Announcement(Base):
+    """公告訊息資料模型。"""
+
+    __tablename__ = "announcements"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])

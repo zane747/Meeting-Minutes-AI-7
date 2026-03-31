@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}最新消息 - Meeting Minutes AI{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-800">最新消息</h1>
+    {% if current_user.role <= 2 %}
+    <a href="/announcements/create"
+       class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+        發布公告
+    </a>
+    {% endif %}
+</div>
+
+{% if announcements %}
+<!-- 搜尋列 -->
+<div class="flex gap-3 mb-4">
+    <input id="search-keyword" type="text" placeholder="搜尋標題..."
+           class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+           oninput="filterAnnouncements()">
+    <button type="button" onclick="clearSearch()" class="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300">清除</button>
+</div>
+<p id="search-no-result" class="hidden text-center text-gray-400 text-sm py-4">找不到符合條件的公告</p>
+
+<div id="announcement-list" class="space-y-3">
+    {% for a in announcements %}
+    <div class="announcement-card bg-white border rounded-lg p-4 hover:shadow-sm transition"
+         data-title="{{ a.title|lower }}">
+        <a href="/announcements/{{ a.id }}" class="block">
+            <div class="flex items-center gap-3">
+                {% if a.is_pinned %}
+                <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">置頂</span>
+                {% endif %}
+                <h3 class="font-semibold text-gray-800 flex-1">{{ a.title }}</h3>
+            </div>
+            <div class="flex gap-4 text-xs text-gray-500 mt-2">
+                <span>發布者：{{ a.creator.username if a.creator else '（系統）' }}</span>
+                <span>{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                {% if a.updated_at > a.created_at %}
+                <span>（已編輯）</span>
+                {% endif %}
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-16">
+    <p class="text-gray-400 text-lg mb-4">目前沒有公告</p>
+    {% if current_user.role <= 2 %}
+    <a href="/announcements/create" class="text-blue-600 hover:underline">發布第一則公告</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterAnnouncements() {
+    const keyword = document.getElementById('search-keyword').value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.announcement-card');
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+        if (!keyword || card.dataset.title.includes(keyword)) {
+            card.classList.remove('hidden');
+            visibleCount++;
+        } else {
+            card.classList.add('hidden');
+        }
+    });
+
+    document.getElementById('search-no-result').classList.toggle('hidden', visibleCount > 0);
+}
+
+function clearSearch() {
+    document.getElementById('search-keyword').value = '';
+    filterAnnouncements();
+}
+</script>
+{% endblock %}

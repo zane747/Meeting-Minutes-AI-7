@@ -92,10 +92,11 @@ app.mount( ##把 static 目錄掛載到 /static 路徑，讓瀏覽器能訪問 C
 # 【新手導讀】include_router 就是告訴 FastAPI「把這組路由加進來」。
 # 順序很重要：auth 要在 pages 前面，因為 /login、/register 路由
 # 不需要認證，要優先被匹配到。
-from app.api.routes import accounts, admin, auth, meetings, pages
+from app.api.routes import accounts, admin, announcements, auth, meetings, pages
 
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(accounts.router)
 app.include_router(meetings.router)
+app.include_router(announcements.router)
 app.include_router(pages.router)

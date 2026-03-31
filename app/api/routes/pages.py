@@ -10,7 +10,7 @@ current_user 參數不只是用來「擋人」，還會被傳入模板的 contex
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -19,8 +19,8 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user
-from app.models.database_models import Meeting, User
+from app.dependencies import get_current_user, require_role
+from app.models.database_models import Announcement, Meeting, User
 
 router = APIRouter(tags=["pages"])
 
@@ -172,4 +172,108 @@ async def meeting_detail(
             "is_owner": is_owner,
             "can_edit": can_edit,
         },
+    ))
+
+
+# === 公告頁面 ===
+
+
+@router.get("/announcements", response_class=HTMLResponse)
+async def announcements_list(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> HTMLResponse:
+    """公告列表頁。"""
+    result = await db.execute(
+        select(Announcement)
+        .options(selectinload(Announcement.creator))
+        .order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc())
+    )
+    announcements = list(result.scalars().all())
+
+    return _no_cache_response(templates.TemplateResponse(
+        request=request,
+        name="announcements.html",
+        context={"announcements": announcements, "current_user": current_user},
+    ))
+
+
+@router.get("/announcements/create", response_class=HTMLResponse)
+async def announcement_create_page(
+    request: Request,
+    current_user: dict = Depends(require_role(2)),  # Role 1, 2
+) -> HTMLResponse:
+    """建立公告表單頁。"""
+    return _no_cache_response(templates.TemplateResponse(
+        request=request,
+        name="announcement_form.html",
+        context={"announcement": None, "current_user": current_user},
+    ))
+
+
+@router.get("/announcements/{announcement_id}", response_class=HTMLResponse)
+async def announcement_detail(
+    announcement_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> HTMLResponse:
+    """公告詳情頁。"""
+    result = await db.execute(
+        select(Announcement)
+        .options(selectinload(Announcement.creator))
+        .where(Announcement.id == announcement_id)
+    )
+    announcement = result.scalar_one_or_none()
+
+    if not announcement:
+        return _no_cache_response(templates.TemplateResponse(
+            request=request,
+            name="announcement_detail.html",
+            context={"announcement": None, "error": "公告不存在", "current_user": current_user},
+        ))
+
+    is_owner = announcement.created_by == current_user["user_id"]
+    is_superadmin = current_user.get("role", 3) == 1
+    can_edit = is_owner or is_superadmin
+    can_pin = is_superadmin
+
+    return _no_cache_response(templates.TemplateResponse(
+        request=request,
+        name="announcement_detail.html",
+        context={
+            "announcement": announcement,
+            "current_user": current_user,
+            "can_edit": can_edit,
+            "can_pin": can_pin,
+        },
+    ))
+
+
+@router.get("/announcements/{announcement_id}/edit", response_class=HTMLResponse)
+async def announcement_edit_page(
+    announcement_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> HTMLResponse:
+    """編輯公告表單頁。"""
+    announcement = await db.get(Announcement, announcement_id)
+    if not announcement:
+        return _no_cache_response(templates.TemplateResponse(
+            request=request,
+            name="announcement_form.html",
+            context={"announcement": None, "error": "公告不存在", "current_user": current_user},
+        ))
+
+    is_owner = announcement.created_by == current_user["user_id"]
+    is_superadmin = current_user.get("role", 3) == 1
+    if not is_owner and not is_superadmin:
+        raise HTTPException(status_code=403, detail="無權編輯此公告")
+
+    return _no_cache_response(templates.TemplateResponse(
+        request=request,
+        name="announcement_form.html",
+        context={"announcement": announcement, "current_user": current_user},
     ))

@@ -197,3 +197,47 @@ class VisibilityUpdate(BaseModel):
 
     visibility: str | None = None
     allow_edit: bool | None = None
+
+
+# === Announcement Schemas（公告相關）===
+
+
+class AnnouncementCreate(BaseModel):
+    """建立公告的請求模型。"""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class AnnouncementUpdate(BaseModel):
+    """編輯公告的請求模型。"""
+
+    title: str | None = Field(None, min_length=1, max_length=255)
+    content: str | None = Field(None, min_length=1, max_length=5000)
+
+
+class AnnouncementResponse(BaseModel):
+    """公告完整回應模型。"""
+
+    id: str
+    title: str
+    content: str
+    is_pinned: bool
+    created_by: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AnnouncementListItem(BaseModel):
+    """公告列表項目。"""
+
+    id: str
+    title: str
+    is_pinned: bool
+    created_by: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
